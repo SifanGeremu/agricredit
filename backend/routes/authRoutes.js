@@ -15,6 +15,20 @@ const registerRules = [
   body('password')
     .isLength({ min: 6 })
     .withMessage('Password must be at least 6 characters'),
+  body('farmSize').optional().trim(),
+  body('cropType').optional().trim(),
+  body('location').optional().trim(),
+];
+
+const registerVendorRules = [
+  body('businessName').trim().notEmpty().withMessage('Business name is required'),
+  body('ownerName').trim().notEmpty().withMessage('Owner name is required'),
+  body('phone').trim().notEmpty().withMessage('Phone is required'),
+  body('location').trim().notEmpty().withMessage('Location is required'),
+  body('password')
+    .isLength({ min: 6 })
+    .withMessage('Password must be at least 6 characters'),
+  body('walletNumber').optional().trim(),
 ];
 
 const loginRules = [
@@ -23,6 +37,12 @@ const loginRules = [
 ];
 
 router.post('/register', registerRules, validateRequest, asyncHandler(auth.register));
+router.post(
+  '/register/vendor',
+  registerVendorRules,
+  validateRequest,
+  asyncHandler(auth.registerVendor),
+);
 router.post('/login', loginRules, validateRequest, asyncHandler(auth.login));
 
 export default router;

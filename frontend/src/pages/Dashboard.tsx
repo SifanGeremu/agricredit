@@ -21,7 +21,8 @@ import {
   getNotifications, rejectLoan, rejectVendor, deleteProduct, updateProduct,
   updateFarmerStatus, deleteVendor, markAllNotificationsRead,
   vendorBlockFarmer, vendorUnblockFarmer, getBlockedFarmerIdsForVendor,
-  isFarmerBlockedByVendor, syncFarmerRepaymentDueReminders
+  getBlockedVendorIdsForFarmer,
+  syncFarmerRepaymentDueReminders
 } from '../services/mockApi';
 import { Farmer, Vendor, Admin, Loan, Product, Group, Notification, RepaymentChannel } from '../types';
 
@@ -2276,6 +2277,7 @@ export default function Dashboard() {
   const [data, setData] = useState<any>({
     farmers: [], vendors: [], loans: [], products: [], groups: [], notifications: [],
     blockedFarmerIds: [] as string[],
+    blockedVendorIds: [] as string[],
   });
   const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
   const [loanRequestError, setLoanRequestError] = useState<string | null>(null);
@@ -2285,20 +2287,37 @@ export default function Dashboard() {
   const [repayModalLoan, setRepayModalLoan] = useState<Loan | null>(null);
   const navigate = useNavigate();
 
-  const refreshData = () => {
-    if (user?.role === 'farmer') {
-      syncFarmerRepaymentDueReminders(user.id);
+  const vendorScopeId = (u: typeof user) =>
+    u?.role === 'vendor' ? (u.vendorProfileId ?? u.id) : u?.id;
+
+  const refreshData = async () => {
+    if (!user) return;
+    if (user.role === 'farmer') {
+      await syncFarmerRepaymentDueReminders(user.id);
     }
-    const farmers = getFarmers();
-    const vendors = getVendors();
-    const loans = getLoans();
-    const products = getProducts();
-    const groups = getGroups();
-    const notifications = user ? getNotifications(user.id) : [];
+    const farmers = await getFarmers();
+    const vendors = await getVendors();
+    const loans = await getLoans();
+    const products = await getProducts();
+    const groups = await getGroups();
+    const notifications = await getNotifications(user.id);
     const blockedFarmerIds =
-      user?.role === 'vendor' ? getBlockedFarmerIdsForVendor(user.id) : [];
-    setData({ farmers, vendors, loans, products, groups, notifications, blockedFarmerIds });
-    if (user?.role === 'farmer') {
+      user.role === 'vendor'
+        ? await getBlockedFarmerIdsForVendor(vendorScopeId(user) as string)
+        : [];
+    const blockedVendorIds =
+      user.role === 'farmer' ? await getBlockedVendorIdsForFarmer() : [];
+    setData({
+      farmers,
+      vendors,
+      loans,
+      products,
+      groups,
+      notifications,
+      blockedFarmerIds,
+      blockedVendorIds,
+    });
+    if (user.role === 'farmer') {
       const f = farmers.find((x: Farmer) => x.id === user.id);
       if (f) {
         const { password: _pw, ...safe } = f as Farmer & { password?: string };
@@ -2321,11 +2340,12 @@ export default function Dashboard() {
   }, [navigate]);
 
   useEffect(() => {
-    if (user) refreshData();
+    if (user) void refreshData();
   }, [user?.id]);
 
   const handleLogout = () => {
     localStorage.removeItem('agri_user');
+    localStorage.removeItem('agri_token');
     navigate('/');
   };
 
@@ -2345,7 +2365,7 @@ export default function Dashboard() {
           <div>
             <h1 className="text-3xl font-bold text-emerald-950">
               {user.role === 'farmer' ? `Welcome, ${user.name}` : 
-               user.role === 'vendor' ? user.businessName : 'Admin Panel'}
+               user.role === 'vendor' ? (user.businessName || user.name) : 'Admin Panel'}
             </h1>
             <p className="text-emerald-800/60">
               {user.role === 'farmer' ? 'Empowering your farm with smart credit.' : 
@@ -2373,7 +2393,7 @@ export default function Dashboard() {
                         type="button"
                         onClick={() =>
                           markAllNotificationsRead(user.id).then(() => {
-                            refreshData();
+                            void refreshData();
                           })
                         }
                         className="text-xs font-bold text-emerald-600 hover:underline"
@@ -2514,7 +2534,7 @@ export default function Dashboard() {
           <>
             {activeTab === 'overview' && (
               <VendorOverview
-                vendorId={user.id}
+                vendorId={vendorScopeId(user) as string}
                 loans={data.loans}
                 farmers={data.farmers}
                 products={data.products}
@@ -2523,10 +2543,10 @@ export default function Dashboard() {
             )}
             {activeTab === 'orders' && (
               <VendorOrders
-                vendorId={user.id}
+                vendorId={vendorScopeId(user) as string}
                 loans={data.loans}
                 farmers={data.farmers}
-                onUpdateStatus={(id: string, s) => updateOrderStatus(id, s).then(refreshData)}
+                onUpdateStatus={(id: string, s) => updateOrderStatus(id, s).then(() => void refreshData())}
               />
             )}
             {activeTab === 'products' && (
@@ -2549,7 +2569,7 @@ export default function Dashboard() {
                   </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {data.products.filter((p: Product) => p.vendorId === user.id).map((product: Product) => (
+                  {data.products.filter((p: Product) => p.vendorId === vendorScopeId(user)).map((product: Product) => (
                     <div key={product.id} className="bg-white p-6 rounded-3xl shadow-sm border border-emerald-100 relative group">
                       <div className="bg-emerald-50 w-12 h-12 rounded-2xl flex items-center justify-center text-emerald-600 mb-4">
                         <Package />
@@ -2571,7 +2591,7 @@ export default function Dashboard() {
                           <Settings className="w-4 h-4" />
                         </button>
                         <button 
-                          onClick={() => deleteProduct(product.id).then(refreshData)}
+                          onClick={() => deleteProduct(product.id).then(() => void refreshData())}
                           className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100"
                         >
                           <XCircle className="w-4 h-4" />
@@ -2583,16 +2603,16 @@ export default function Dashboard() {
               </div>
             )}
             {activeTab === 'stats' && (
-              <VendorStatsView vendorId={user.id} loans={data.loans} />
+              <VendorStatsView vendorId={vendorScopeId(user) as string} loans={data.loans} />
             )}
             {activeTab === 'farmers-active' && (
               <VendorFarmersActiveView
-                vendorId={user.id}
+                vendorId={vendorScopeId(user) as string}
                 loans={data.loans}
                 farmers={data.farmers}
                 blockedFarmerIds={data.blockedFarmerIds}
                 onBlock={(farmerId) =>
-                  vendorBlockFarmer(user.id, farmerId).then(refreshData)
+                  vendorBlockFarmer(vendorScopeId(user) as string, farmerId).then(() => void refreshData())
                 }
               />
             )}
@@ -2601,7 +2621,7 @@ export default function Dashboard() {
                 farmers={data.farmers}
                 blockedFarmerIds={data.blockedFarmerIds}
                 onUnblock={(farmerId) =>
-                  vendorUnblockFarmer(user.id, farmerId).then(refreshData)
+                  vendorUnblockFarmer(vendorScopeId(user) as string, farmerId).then(() => void refreshData())
                 }
               />
             )}
@@ -2624,7 +2644,7 @@ export default function Dashboard() {
               <AdminFarmersView
                 farmers={data.farmers}
                 loans={data.loans}
-                onStatus={(id, s) => updateFarmerStatus(id, s).then(refreshData)}
+                onStatus={(id, s) => updateFarmerStatus(id, s).then(() => void refreshData())}
               />
             )}
             {activeTab === 'vendors' && (
@@ -2632,10 +2652,10 @@ export default function Dashboard() {
                 vendors={data.vendors}
                 loans={data.loans}
                 products={data.products}
-                onApprove={(id) => approveVendor(id).then(refreshData)}
-                onReject={(id) => rejectVendor(id).then(refreshData)}
-                onBlock={(id) => rejectVendor(id).then(refreshData)}
-                onRemove={(id) => deleteVendor(id).then(refreshData)}
+                onApprove={(id) => approveVendor(id).then(() => void refreshData())}
+                onReject={(id) => rejectVendor(id).then(() => void refreshData())}
+                onBlock={(id) => rejectVendor(id).then(() => void refreshData())}
+                onRemove={(id) => deleteVendor(id).then(() => void refreshData())}
               />
             )}
             {activeTab === 'loans' && (
@@ -2644,8 +2664,8 @@ export default function Dashboard() {
                 vendors={data.vendors}
                 loans={data.loans}
                 groups={data.groups}
-                onApprove={(id) => approveLoan(id).then(refreshData)}
-                onReject={(id) => rejectLoan(id).then(refreshData)}
+                onApprove={(id) => approveLoan(id).then(() => void refreshData())}
+                onReject={(id) => rejectLoan(id).then(() => void refreshData())}
               />
             )}
             {activeTab === 'groups' && (
@@ -2678,14 +2698,14 @@ export default function Dashboard() {
         inputProductsOnly={user.role === 'farmer'}
         vendors={data.vendors
           .filter((v: Vendor) => v.status === 'active')
-          .filter((v: Vendor) => !isFarmerBlockedByVendor(v.id, user.id))}
+          .filter((v: Vendor) => !data.blockedVendorIds.includes(v.id))}
         products={data.products}
         onSubmit={async (vId: string, pId: string, amt: number) => {
           const res = await requestLoan(user.id, vId, pId, amt);
           if (res.success) {
             setLoanRequestError(null);
             setIsLoanModalOpen(false);
-            refreshData();
+            void refreshData();
           } else {
             setLoanRequestError(res.message ?? 'Could not submit request.');
           }
@@ -2700,7 +2720,7 @@ export default function Dashboard() {
           if (!repayModalLoan) return;
           repayLoan(repayModalLoan.id, channel).then(() => {
             setRepayModalLoan(null);
-            refreshData();
+            void refreshData();
           });
         }}
       />
@@ -2713,12 +2733,12 @@ export default function Dashboard() {
           if (editingProduct) {
             updateProduct(editingProduct.id, formData).then(() => {
               setIsProductModalOpen(false);
-              refreshData();
+              void refreshData();
             });
           } else {
-            addProduct({ ...formData, vendorId: user.id }).then(() => {
+            addProduct({ ...formData, vendorId: vendorScopeId(user) as string }).then(() => {
               setIsProductModalOpen(false);
-              refreshData();
+              void refreshData();
             });
           }
         }}

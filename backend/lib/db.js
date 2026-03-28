@@ -8,4 +8,5 @@ export {
   RepaymentStatus,
   TransactionType,
   TransactionStatus,
+  UserAccountStatus,
 } from '../prisma/generated/client/index.js';

@@ -4,15 +4,24 @@
  */
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
-import { PrismaClient, Role, LoanStatus, RepaymentStatus } from '../lib/db.js';
+import {
+  PrismaClient,
+  Role,
+  LoanStatus,
+  RepaymentStatus,
+  UserAccountStatus,
+} from '../lib/db.js';
 
 const prisma = new PrismaClient();
 
 async function main() {
   const passwordHash = await bcrypt.hash('Demo123!', 12);
 
+  await prisma.notification.deleteMany();
+  await prisma.vendorFarmerBlock.deleteMany();
   await prisma.repayment.deleteMany();
   await prisma.transaction.deleteMany();
+  await prisma.product.deleteMany();
   await prisma.loan.deleteMany();
   await prisma.vendor.deleteMany();
   await prisma.user.deleteMany();
@@ -28,6 +37,7 @@ async function main() {
       nationalId: '100000000001',
       password: passwordHash,
       role: Role.admin,
+      accountStatus: UserAccountStatus.active,
       groupId: null,
       creditScore: 100,
     },
@@ -40,6 +50,7 @@ async function main() {
       nationalId: '200000000010',
       password: passwordHash,
       role: Role.user,
+      accountStatus: UserAccountStatus.active,
       groupId: g1.id,
       creditScore: 45,
     },
@@ -52,6 +63,7 @@ async function main() {
       nationalId: '200000000011',
       password: passwordHash,
       role: Role.user,
+      accountStatus: UserAccountStatus.active,
       groupId: g1.id,
       creditScore: 60,
     },
@@ -64,6 +76,7 @@ async function main() {
       nationalId: '200000000012',
       password: passwordHash,
       role: Role.user,
+      accountStatus: UserAccountStatus.active,
       groupId: g1.id,
       creditScore: 75,
     },
@@ -76,6 +89,7 @@ async function main() {
       nationalId: '200000000013',
       password: passwordHash,
       role: Role.user,
+      accountStatus: UserAccountStatus.active,
       groupId: g2.id,
       creditScore: 72,
     },
@@ -88,6 +102,7 @@ async function main() {
       nationalId: '200000000014',
       password: passwordHash,
       role: Role.user,
+      accountStatus: UserAccountStatus.active,
       groupId: g2.id,
       creditScore: 70,
     },
@@ -100,6 +115,7 @@ async function main() {
       nationalId: '300000000001',
       password: passwordHash,
       role: Role.vendor,
+      accountStatus: UserAccountStatus.active,
     },
   });
 
@@ -120,6 +136,7 @@ async function main() {
       nationalId: '300000000002',
       password: passwordHash,
       role: Role.vendor,
+      accountStatus: UserAccountStatus.active,
     },
   });
 
@@ -131,6 +148,32 @@ async function main() {
       walletNumber: '254710000002',
       isVerified: true,
     },
+  });
+
+  await prisma.product.createMany({
+    data: [
+      {
+        vendorId: vendor1.id,
+        name: 'Maize Seeds',
+        category: 'Seeds',
+        price: 5000,
+        stock: 100,
+      },
+      {
+        vendorId: vendor1.id,
+        name: 'NPK Fertilizer',
+        category: 'Fertilizers',
+        price: 12000,
+        stock: 50,
+      },
+      {
+        vendorId: vendor2.id,
+        name: 'Coffee Seedlings',
+        category: 'Seeds',
+        price: 8000,
+        stock: 40,
+      },
+    ],
   });
 
   const due = new Date();

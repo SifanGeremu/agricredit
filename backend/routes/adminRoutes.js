@@ -38,4 +38,19 @@ router.post(
 router.get('/vendors', asyncHandler(admin.listAdminVendors));
 router.get('/stats', asyncHandler(admin.adminStats));
 
+router.get('/farmers', asyncHandler(admin.listFarmers));
+router.patch(
+  '/farmers/:id/status',
+  body('status').trim().notEmpty().withMessage('status is required'),
+  validateRequest,
+  asyncHandler(admin.updateFarmerStatus),
+);
+
+router.post('/vendors/:id/verify', asyncHandler(admin.verifyVendor));
+router.post('/vendors/:id/reject', asyncHandler(admin.rejectVendorSignup));
+router.delete('/vendors/:id', asyncHandler(admin.deleteVendorAccount));
+
+router.get('/groups', asyncHandler(admin.listGroups));
+router.get('/products', asyncHandler(admin.listAllProducts));
+
 export default router;

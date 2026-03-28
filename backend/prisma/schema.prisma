@@ -19,6 +19,13 @@ enum Role {
   vendor
 }
 
+enum UserAccountStatus {
+  active
+  pending
+  suspended
+  blocked
+}
+
 enum LoanStatus {
   pending
   approved
@@ -51,19 +58,24 @@ model Group {
 }
 
 model User {
-  id          String   @id @default(auto()) @map("_id") @db.ObjectId
-  name        String
-  phone       String   @unique
-  nationalId  String   @unique
-  password    String
-  role        Role     @default(user)
-  groupId     String?  @db.ObjectId
-  group       Group?   @relation(fields: [groupId], references: [id])
-  creditScore Int      @default(50)
-  vendor      Vendor?
-  loans       Loan[]   @relation("FarmerLoans")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id             String            @id @default(auto()) @map("_id") @db.ObjectId
+  name           String
+  phone          String            @unique
+  nationalId     String            @unique
+  password       String
+  role           Role              @default(user)
+  accountStatus  UserAccountStatus @default(active)
+  groupId        String?           @db.ObjectId
+  group          Group?            @relation(fields: [groupId], references: [id])
+  creditScore    Int               @default(50)
+  farmSize       String?
+  cropType       String?
+  location       String?
+  vendor         Vendor?
+  loans          Loan[]            @relation("FarmerLoans")
+  notifications  Notification[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 }
 
 model Vendor {
@@ -71,10 +83,26 @@ model Vendor {
   userId       String?  @unique @db.ObjectId
   user         User?    @relation(fields: [userId], references: [id])
   name         String
+  ownerName    String?
   phone        String
+  location     String?
   walletNumber String
   isVerified   Boolean  @default(true)
   loans        Loan[]
+  products     Product[]
+  farmerBlocks VendorFarmerBlock[]
+}
+
+model Product {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  vendorId  String   @db.ObjectId
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  name      String
+  category  String
+  price     Float
+  stock     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Loan {
@@ -86,11 +114,35 @@ model Loan {
   status      LoanStatus @default(pending)
   vendorId    String?    @db.ObjectId
   vendor      Vendor?    @relation(fields: [vendorId], references: [id])
+  productId   String?    @db.ObjectId
+  productName String?
   dueDate     DateTime?
+  repayBy     DateTime?
   reason      String?
   repayments  Repayment[]
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
+}
+
+model VendorFarmerBlock {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  vendorId  String   @db.ObjectId
+  vendor    Vendor   @relation(fields: [vendorId], references: [id])
+  farmerId  String   @db.ObjectId
+  createdAt DateTime @default(now())
+
+  @@unique([vendorId, farmerId])
+}
+
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String   @default("info")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
 
 model Repayment {

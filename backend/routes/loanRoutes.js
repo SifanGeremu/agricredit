@@ -11,10 +11,10 @@ const router = Router();
 router.use(authenticate, requireRole('user'));
 
 const requestRules = [
-  body('amount')
-    .isFloat({ gt: 0 })
-    .withMessage('Amount must be a positive number'),
-  body('purpose').trim().notEmpty().withMessage('Purpose is required'),
+  body('amount').optional().isFloat({ gt: 0 }).withMessage('Amount must be a positive number'),
+  body('purpose').optional().trim(),
+  body('vendorId').optional().trim(),
+  body('productId').optional().trim(),
 ];
 
 const selectVendorRules = [

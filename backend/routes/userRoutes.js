@@ -9,5 +9,8 @@ const router = Router();
 router.use(authenticate, requireRole('user'));
 
 router.get('/loans', asyncHandler(user.getMyLoans));
+router.get('/group', asyncHandler(user.getMyGroup));
+router.get('/catalog/products', asyncHandler(user.listCatalogProducts));
+router.get('/blocked-vendors', asyncHandler(user.listBlockedVendorIds));
 
 export default router;

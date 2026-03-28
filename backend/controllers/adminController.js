@@ -4,7 +4,8 @@ import { AppError } from '../middleware/errorHandler.js';
 import { disburseToVendor } from '../services/mpesaService.js';
 import { addMonths } from '../services/loanRules.js';
 import { smsLoanApproved, smsLoanDisbursed } from '../services/smsSimulator.js';
-import { LoanStatus, Role } from '../lib/db.js';
+import { LoanStatus, Role, UserAccountStatus } from '../lib/db.js';
+import { notifyUser } from '../services/notifications.js';
 
 export async function listLoans(req, res, next) {
   try {
@@ -47,6 +48,12 @@ export async function approveLoan(req, res, next) {
       data: { status: LoanStatus.approved, dueDate, reason: null },
     });
     smsLoanApproved(loan.user.phone, loan.amount);
+    await notifyUser(
+      loan.userId,
+      'Loan approved',
+      `Your credit for ${loan.purpose} (₦${loan.amount.toLocaleString()}) was approved. ${loan.vendorId ? 'Awaiting disbursement to vendor.' : 'Select a vendor in the app.'}`,
+      'success',
+    );
     res.json({
       success: true,
       message: 'Loan approved; due date set to 3 months from today.',
@@ -71,6 +78,12 @@ export async function rejectLoan(req, res, next) {
       where: { id },
       data: { status: LoanStatus.rejected, reason },
     });
+    await notifyUser(
+      loan.userId,
+      'Loan not approved',
+      `Your request for ${loan.productName || loan.purpose} (₦${loan.amount.toLocaleString()}) was rejected. ${reason}`,
+      'error',
+    );
     res.json({ success: true, message: 'Loan rejected', data: { loan: updated } });
   } catch (e) {
     next(e);
@@ -98,6 +111,18 @@ export async function disburseLoan(req, res, next) {
       data: { status: LoanStatus.disbursed },
     });
     smsLoanDisbursed(loan.vendor.phone, loan.amount, loan.user.name);
+    await notifyUser(
+      loan.vendor.userId,
+      'Payment received',
+      `₦${loan.amount.toLocaleString()} for ${loan.productName || loan.purpose} was sent to your account. Confirm delivery when the farmer receives the goods.`,
+      'success',
+    );
+    await notifyUser(
+      loan.userId,
+      'Payment sent to vendor',
+      `Your credit for ${loan.productName || loan.purpose} (₦${loan.amount.toLocaleString()}) was sent to the vendor. You will be notified when inputs are delivered.`,
+      'success',
+    );
     res.json({
       success: true,
       message: 'Funds disbursed to vendor (per policy).',
@@ -134,6 +159,7 @@ export async function createVendor(req, res, next) {
         nationalId,
         password: hash,
         role: Role.vendor,
+        accountStatus: UserAccountStatus.active,
       },
     });
     const vendor = await prisma.vendor.create({
@@ -159,12 +185,29 @@ export async function createVendor(req, res, next) {
 export async function listAdminVendors(req, res, next) {
   try {
     const vendors = await prisma.vendor.findMany({
-      include: { user: { select: { id: true, phone: true, name: true } } },
+      include: {
+        user: { select: { id: true, phone: true, name: true, accountStatus: true } },
+      },
     });
-    res.json({ success: true, data: { vendors } });
+    const mapped = vendors.map((v) => ({
+      id: v.id,
+      businessName: v.name,
+      ownerName: v.ownerName || v.user?.name,
+      phone: v.phone,
+      location: v.location || '',
+      role: 'vendor',
+      status: mapVendorUiStatus(v, v.user),
+    }));
+    res.json({ success: true, data: { vendors: mapped } });
   } catch (e) {
     next(e);
   }
+}
+
+function mapVendorUiStatus(vendor, user) {
+  if (user?.accountStatus === UserAccountStatus.blocked) return 'blocked';
+  if (!vendor.isVerified) return 'pending';
+  return 'active';
 }
 
 export async function adminStats(req, res, next) {
@@ -176,6 +219,7 @@ export async function adminStats(req, res, next) {
       vendorUserCount,
       vendorProfileCount,
       groupCount,
+      productCount,
     ] = await Promise.all([
       prisma.loan.groupBy({
         by: ['status'],
@@ -186,6 +230,7 @@ export async function adminStats(req, res, next) {
       prisma.user.count({ where: { role: Role.vendor } }),
       prisma.vendor.count(),
       prisma.group.count(),
+      prisma.product.count(),
     ]);
     res.json({
       success: true,
@@ -196,8 +241,167 @@ export async function adminStats(req, res, next) {
         vendorUsers: vendorUserCount,
         vendors: vendorProfileCount,
         groups: groupCount,
+        products: productCount,
       },
     });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listFarmers(req, res, next) {
+  try {
+    const farmers = await prisma.user.findMany({
+      where: { role: Role.user },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        nationalId: true,
+        creditScore: true,
+        farmSize: true,
+        cropType: true,
+        location: true,
+        accountStatus: true,
+        groupId: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    const mapped = farmers.map((f) => ({
+      ...f,
+      role: 'farmer',
+      status: mapAccountStatus(f.accountStatus),
+    }));
+    res.json({ success: true, data: { farmers: mapped } });
+  } catch (e) {
+    next(e);
+  }
+}
+
+function mapAccountStatus(s) {
+  if (s === UserAccountStatus.suspended) return 'suspended';
+  if (s === UserAccountStatus.blocked) return 'blocked';
+  if (s === UserAccountStatus.pending) return 'pending';
+  return 'active';
+}
+
+export async function updateFarmerStatus(req, res, next) {
+  try {
+    const { id } = req.params;
+    const status = String(req.body.status || '').trim();
+    const map = {
+      active: UserAccountStatus.active,
+      suspended: UserAccountStatus.suspended,
+      blocked: UserAccountStatus.blocked,
+    };
+    if (!map[status]) throw new AppError('Invalid status', 400);
+    const farmer = await prisma.user.findFirst({
+      where: { id, role: Role.user },
+    });
+    if (!farmer) throw new AppError('Farmer not found', 404);
+    await prisma.user.update({
+      where: { id },
+      data: { accountStatus: map[status] },
+    });
+    res.json({ success: true, message: 'Farmer updated' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function verifyVendor(req, res, next) {
+  try {
+    const { id } = req.params;
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!vendor?.user) throw new AppError('Vendor not found', 404);
+    await prisma.vendor.update({
+      where: { id },
+      data: { isVerified: true },
+    });
+    await prisma.user.update({
+      where: { id: vendor.userId },
+      data: { accountStatus: UserAccountStatus.active },
+    });
+    await notifyUser(
+      vendor.userId,
+      'Vendor approved',
+      'Your AgroVendor account is active. You can log in and manage inventory.',
+      'success',
+    );
+    res.json({ success: true, message: 'Vendor verified' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function rejectVendorSignup(req, res, next) {
+  try {
+    const { id } = req.params;
+    const vendor = await prisma.vendor.findUnique({ where: { id } });
+    if (!vendor?.userId) throw new AppError('Vendor not found', 404);
+    await prisma.user.update({
+      where: { id: vendor.userId },
+      data: { accountStatus: UserAccountStatus.blocked },
+    });
+    await prisma.vendor.update({
+      where: { id },
+      data: { isVerified: false },
+    });
+    res.json({ success: true, message: 'Vendor rejected' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function deleteVendorAccount(req, res, next) {
+  try {
+    const { id } = req.params;
+    const vendor = await prisma.vendor.findUnique({
+      where: { id },
+      include: { _count: { select: { loans: true } } },
+    });
+    if (!vendor) throw new AppError('Vendor not found', 404);
+    if (vendor._count.loans > 0) {
+      throw new AppError('Cannot delete vendor with existing loans', 400);
+    }
+    await prisma.product.deleteMany({ where: { vendorId: id } });
+    await prisma.vendorFarmerBlock.deleteMany({ where: { vendorId: id } });
+    await prisma.vendor.delete({ where: { id } });
+    if (vendor.userId) {
+      await prisma.user.delete({ where: { id: vendor.userId } });
+    }
+    res.json({ success: true, message: 'Vendor removed' });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listGroups(req, res, next) {
+  try {
+    const groups = await prisma.group.findMany({
+      include: { users: { select: { id: true } } },
+    });
+    const mapped = groups.map((g) => ({
+      id: g.id,
+      name: g.name,
+      memberIds: g.users.map((u) => u.id),
+      repaymentRate: 100,
+    }));
+    res.json({ success: true, data: { groups: mapped } });
+  } catch (e) {
+    next(e);
+  }
+}
+
+export async function listAllProducts(req, res, next) {
+  try {
+    const products = await prisma.product.findMany({
+      include: { vendor: { select: { id: true, name: true } } },
+    });
+    res.json({ success: true, data: { products } });
   } catch (e) {
     next(e);
   }

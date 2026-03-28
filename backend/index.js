@@ -13,6 +13,7 @@ import vendorsPublicRoutes from './routes/vendorsPublicRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import vendorRoutes from './routes/vendorRoutes.js';
 import mpesaRoutes from './routes/mpesaRoutes.js';
+import notificationsRoutes from './routes/notificationsRoutes.js';
 import { errorHandler, AppError } from './middleware/errorHandler.js';
 
 const app = express();
@@ -45,6 +46,7 @@ app.use('/vendors', vendorsPublicRoutes);
 app.use('/admin', adminRoutes);
 app.use('/vendor', vendorRoutes);
 app.use('/mpesa', mpesaRoutes);
+app.use('/notifications', notificationsRoutes);
 
 app.use((req, res, next) => {
   next(new AppError(`Not found: ${req.method} ${req.path}`, 404));

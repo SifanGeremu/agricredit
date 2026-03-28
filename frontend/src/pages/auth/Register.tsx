@@ -155,7 +155,15 @@ export default function Register() {
                     <div>
                       <label className="block text-sm font-semibold text-emerald-900">National ID</label>
                       <input
-                        name="nationalId" type="text" required onChange={handleChange}
+                        name="nationalId"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="\d{12}"
+                        minLength={12}
+                        maxLength={12}
+                        title="12 digits (backend requirement)"
+                        required
+                        onChange={handleChange}
                         className="mt-1 block w-full px-4 py-3 border border-emerald-100 rounded-xl focus:ring-emerald-500 focus:border-emerald-500"
                       />
                     </div>

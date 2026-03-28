@@ -25,7 +25,10 @@ export default function Login() {
 
     try {
       const response = await loginUser(phone, role, password);
-      if (response.success) {
+      if (response.success && response.user) {
+        if (response.token) {
+          localStorage.setItem('agri_token', response.token);
+        }
         localStorage.setItem('agri_user', JSON.stringify(response.user));
         navigate('/dashboard');
       } else {
