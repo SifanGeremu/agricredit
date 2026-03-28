@@ -1,0 +1,432 @@
+{
+  "info": {
+    "_postman_id": "8f4a2c10-9b3e-4f1a-a7d2-agricredit0001",
+    "name": "AgriCredit API",
+    "description": "Generated from backend routes (Express). No /api prefix. JWT: farmers use {{token}}, admin {{adminToken}}, vendor {{vendorToken}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000" },
+    { "key": "token", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "vendorToken", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "loanId", "value": "" },
+    { "key": "vendorId", "value": "" },
+    { "key": "applicationId", "value": "" },
+    { "key": "paymentId", "value": "" },
+    { "key": "transactionId", "value": "" },
+    { "key": "phoneNumber", "value": "251777564882" }
+  ],
+  "item": [
+    {
+      "name": "Public",
+      "item": [
+        {
+          "name": "Root",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/"
+          }
+        },
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register User (Farmer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.token) { pm.collectionVariables.set('token', jsonData.token); }",
+                  "  if (jsonData.accessToken) { pm.collectionVariables.set('token', jsonData.accessToken); }",
+                  "  if (jsonData.data && jsonData.data.token) { pm.collectionVariables.set('token', jsonData.data.token); }",
+                  "  if (jsonData.data && jsonData.data.user && jsonData.data.user.id) { pm.collectionVariables.set('userId', jsonData.data.user.id); }",
+                  "  if (jsonData.user && jsonData.user.id) { pm.collectionVariables.set('userId', jsonData.user.id); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Farmer\",\n  \"phone\": \"251777564880\",\n  \"nationalId\": \"200000000099\",\n  \"password\": \"Demo123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
+          }
+        },
+        {
+          "name": "Login User (Farmer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.token) { pm.collectionVariables.set('token', jsonData.token); }",
+                  "  if (jsonData.accessToken) { pm.collectionVariables.set('token', jsonData.accessToken); }",
+                  "  if (jsonData.data && jsonData.data.token) { pm.collectionVariables.set('token', jsonData.data.token); }",
+                  "  if (jsonData.data && jsonData.data.user && jsonData.data.user.id) { pm.collectionVariables.set('userId', jsonData.data.user.id); }",
+                  "  if (jsonData.user && jsonData.user.id) { pm.collectionVariables.set('userId', jsonData.user.id); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"251777564880\",\n  \"password\": \"Demo123!\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.token) { pm.collectionVariables.set('adminToken', jsonData.token); }",
+                  "  if (jsonData.accessToken) { pm.collectionVariables.set('adminToken', jsonData.accessToken); }",
+                  "  if (jsonData.data && jsonData.data.token) { pm.collectionVariables.set('adminToken', jsonData.data.token); }",
+                  "  if (jsonData.data && jsonData.data.user && jsonData.data.user.id) { pm.collectionVariables.set('userId', jsonData.data.user.id); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"254700000001\",\n  \"password\": \"Demo123!\"\n}"
+            },
+            "description": "Uses seed admin from README (adjust phone if your seed differs). Same POST /auth/login as farmers.",
+            "url": "{{baseUrl}}/auth/login"
+          }
+        },
+        {
+          "name": "Login Vendor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.data && jsonData.data.token) { pm.collectionVariables.set('vendorToken', jsonData.data.token); }",
+                  "  if (jsonData.data && jsonData.data.vendorId) { pm.collectionVariables.set('vendorId', jsonData.data.vendorId); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"254710000001\",\n  \"password\": \"Demo123!\"\n}"
+            },
+            "description": "Seed vendor phone from README; adjust if needed.",
+            "url": "{{baseUrl}}/auth/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Farmer — Loans",
+      "item": [
+        {
+          "name": "Request Loan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.data && jsonData.data.loan && jsonData.data.loan.id) { pm.collectionVariables.set('loanId', jsonData.data.loan.id); }",
+                  "  if (jsonData.loan && jsonData.loan.id) { pm.collectionVariables.set('loanId', jsonData.loan.id); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"purpose\": \"Seeds and fertilizer\"\n}"
+            },
+            "url": "{{baseUrl}}/loan/request"
+          }
+        },
+        {
+          "name": "Select Vendor",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loanId\": \"{{loanId}}\",\n  \"vendorId\": \"{{vendorId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/loan/select-vendor"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Farmer — User & Vendors",
+      "item": [
+        {
+          "name": "Get My Loans",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/user/loans"
+          }
+        },
+        {
+          "name": "List Verified Vendors",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/vendors"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List All Loans",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/loans"
+          }
+        },
+        {
+          "name": "Approve Loan",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/admin/loan/{{loanId}}/approve"
+          }
+        },
+        {
+          "name": "Reject Loan",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Does not meet criteria\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/loan/{{loanId}}/reject"
+          }
+        },
+        {
+          "name": "Disburse to Vendor (M-Pesa B2C)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/admin/loan/{{loanId}}/disburse"
+          }
+        },
+        {
+          "name": "Create Vendor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.data && jsonData.data.vendor && jsonData.data.vendor.id) { pm.collectionVariables.set('vendorId', jsonData.data.vendor.id); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"New Vendor Agro\",\n  \"phone\": \"251777564883\",\n  \"walletNumber\": \"251777564883\",\n  \"password\": \"Demo123!\"\n}"
+            },
+            "url": "{{baseUrl}}/admin/vendors"
+          }
+        },
+        {
+          "name": "List Vendors (Admin)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/vendors"
+          }
+        },
+        {
+          "name": "Stats",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{adminToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/admin/stats"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Vendor",
+      "item": [
+        {
+          "name": "Get Assigned Loans",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{vendorToken}}", "type": "string" }]
+            },
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/vendor/loans"
+          }
+        },
+        {
+          "name": "Confirm Delivery",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{vendorToken}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/vendor/loan/{{loanId}}/confirm-delivery"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Repayments (M-Pesa)",
+      "item": [
+        {
+          "name": "Repay Loan (STK via mpesaService)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "  var jsonData = pm.response.json();",
+                  "  if (jsonData.data && jsonData.data.repayment && jsonData.data.repayment.id) { pm.collectionVariables.set('paymentId', jsonData.data.repayment.id); }",
+                  "  if (jsonData.data && jsonData.data.mpesa && jsonData.data.mpesa.reference) { pm.collectionVariables.set('transactionId', jsonData.data.mpesa.reference); }",
+                  "} catch (e) {}",
+                  ""
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+            },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"loanId\": \"{{loanId}}\",\n  \"amount\": 5000\n}"
+            },
+            "description": "Requires loan status delivered. Uses farmer JWT; server calls Safaricom STK from mpesaService.",
+            "url": "{{baseUrl}}/mpesa/repay"
+          }
+        }
+      ]
+    }
+  ]
+}

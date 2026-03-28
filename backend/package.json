@@ -1,0 +1,29 @@
+{
+  "name": "agricredit-backend",
+  "version": "1.0.0",
+  "description": "AgriCredit fintech hackathon API — farmers, vendors, admin, M-Pesa flow",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js",
+    "seed": "node data/seed.js",
+    "generate": "prisma generate",
+    "setup": "npm install && npm run generate"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.5.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-validator": "^7.2.1",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "prisma": "^6.5.0"
+  }
+}

@@ -1,0 +1,113 @@
+// AgriCredit — MongoDB + Prisma
+// Run: npx prisma generate && npx prisma db push (or migrate for Mongo)
+
+// Custom output keeps engines out of node_modules/.prisma — avoids Windows/OneDrive EPERM
+// on renaming query_engine-windows.dll.node (see README troubleshooting).
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated/client"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  user
+  admin
+  vendor
+}
+
+enum LoanStatus {
+  pending
+  approved
+  rejected
+  disbursed
+  delivered
+  repaid
+}
+
+enum RepaymentStatus {
+  pending
+  success
+  failed
+}
+
+enum TransactionType {
+  disburse
+  repay
+}
+
+enum TransactionStatus {
+  success
+  failed
+}
+
+model Group {
+  id    String @id @default(auto()) @map("_id") @db.ObjectId
+  name  String
+  users User[]
+}
+
+model User {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  name        String
+  phone       String   @unique
+  nationalId  String   @unique
+  password    String
+  role        Role     @default(user)
+  groupId     String?  @db.ObjectId
+  group       Group?   @relation(fields: [groupId], references: [id])
+  creditScore Int      @default(50)
+  vendor      Vendor?
+  loans       Loan[]   @relation("FarmerLoans")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Vendor {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId       String?  @unique @db.ObjectId
+  user         User?    @relation(fields: [userId], references: [id])
+  name         String
+  phone        String
+  walletNumber String
+  isVerified   Boolean  @default(true)
+  loans        Loan[]
+}
+
+model Loan {
+  id          String     @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String     @db.ObjectId
+  user        User       @relation("FarmerLoans", fields: [userId], references: [id])
+  amount      Float
+  purpose     String
+  status      LoanStatus @default(pending)
+  vendorId    String?    @db.ObjectId
+  vendor      Vendor?    @relation(fields: [vendorId], references: [id])
+  dueDate     DateTime?
+  reason      String?
+  repayments  Repayment[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Repayment {
+  id             String          @id @default(auto()) @map("_id") @db.ObjectId
+  loanId         String          @db.ObjectId
+  loan           Loan            @relation(fields: [loanId], references: [id])
+  amount         Float
+  status         RepaymentStatus
+  transactionRef String?
+}
+
+model Transaction {
+  id        String            @id @default(auto()) @map("_id") @db.ObjectId
+  type      TransactionType
+  phone     String
+  amount    Float
+  status    TransactionStatus
+  reference String            @unique
+  createdAt DateTime          @default(now())
+}
