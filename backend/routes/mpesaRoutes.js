@@ -13,6 +13,8 @@ const repayRules = [
   body('amount')
     .isFloat({ gt: 0 })
     .withMessage('Amount must be a positive number'),
+  /** Same MSISDN as Postman STK PhoneNumber / PartyA — receives the push prompt. */
+  body('phone').optional().trim(),
 ];
 
 router.post('/repay', authenticate, requireRole('user'), repayRules, validateRequest, asyncHandler(mpesa.repayLoan));

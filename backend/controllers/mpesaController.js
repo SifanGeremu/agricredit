@@ -20,6 +20,39 @@ function genTxnRef() {
   return `TXN_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 }
 
+function digitsOnly(s) {
+  return String(s ?? '').replace(/\D/g, '');
+}
+
+/**
+ * Handset that receives the STK prompt — matches Postman `PhoneNumber` / `PartyA` in the processrequest JSON.
+ * Order: optional env override → `phone` in POST body → JWT user phone.
+ */
+function resolveStkDestinationPhone(req) {
+  const accountPhone = req.user.phone;
+  const rawBody =
+    req.body.phone != null && String(req.body.phone).trim() !== ''
+      ? String(req.body.phone).trim()
+      : '';
+  const envMsisdn = process.env.MPESA_STK_MSISDN;
+  const useEnvMsisdn = process.env.MPESA_STK_USE_ENV_MSISDN === 'true' && envMsisdn;
+
+  if (useEnvMsisdn) {
+    return envMsisdn.trim();
+  }
+  if (rawBody) {
+    const allowMismatch = process.env.MPESA_STK_ALLOW_PHONE_MISMATCH === 'true';
+    if (!allowMismatch && digitsOnly(rawBody) !== digitsOnly(accountPhone)) {
+      throw new AppError(
+        'M-Pesa phone must match your account phone (or set MPESA_STK_ALLOW_PHONE_MISMATCH=true for sandbox test handsets).',
+        400,
+      );
+    }
+    return rawBody;
+  }
+  return accountPhone;
+}
+
 /** Walk callback JSON (Ethiopia / Daraja shapes) for ResultCode 0 and AccountReference. */
 function parseStkCallbackPayload(body) {
   let resultOk = false;
@@ -157,8 +190,8 @@ export async function repayLoan(req, res, next) {
       throw new AppError(`Amount exceeds remaining balance (${remaining})`, 400);
     }
 
-    const phone = req.user.phone;
-    const mpesa = await receiveRepayment(phone, amount);
+    const stkPhone = resolveStkDestinationPhone(req);
+    const mpesa = await receiveRepayment(stkPhone, amount);
     if (!mpesa.ok) {
       throw new AppError(
         mpesa.message || 'M-Pesa STK failed — repayment not recorded.',
@@ -167,7 +200,10 @@ export async function repayLoan(req, res, next) {
     }
 
     const defer =
-      deferRepaymentUntilCallback() && mpesa.stkInitiated && !mpesa.simulated;
+      deferRepaymentUntilCallback() &&
+      mpesa.stkInitiated &&
+      !mpesa.simulated &&
+      !mpesa.mock;
 
     const mpesaSummary =
       mpesa.stkInitiated && mpesa.checkoutRequestId
@@ -210,7 +246,7 @@ export async function repayLoan(req, res, next) {
 
     await logTransaction({
       type: TransactionType.repay,
-      phone,
+      phone: mpesa.phoneUsed || stkPhone,
       amount,
       status: TransactionStatus.success,
       reference: mpesa.reference,
@@ -224,7 +260,7 @@ export async function repayLoan(req, res, next) {
         data: { status: LoanStatus.repaid },
       });
       await increaseCreditAfterRepayment(prisma, userId, 20);
-      smsLoanRepaid(phone, loan.amount);
+      smsLoanRepaid(req.user.phone, loan.amount);
     }
 
     const loanDone = newTotal >= loan.amount;

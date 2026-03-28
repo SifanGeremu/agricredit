@@ -23,6 +23,14 @@ function mpesaAllowSimulatedFallback() {
   return process.env.MPESA_ALLOW_SIMULATED_FALLBACK === 'true';
 }
 
+/**
+ * No real HTTP calls to Safaricom — returns Postman-shaped success JSON for demos / local testing.
+ * Set MPESA_MOCK_MODE=true in backend/.env
+ */
+function mpesaMockMode() {
+  return process.env.MPESA_MOCK_MODE === 'true';
+}
+
 /** Strip to digits only — full international MSISDN (251… / 254…). */
 function normalizeMsisdn(phone) {
   return String(phone).replace(/\D/g, '');
@@ -174,6 +182,27 @@ function pickStkFields(parsed) {
 export async function disburseToVendor(phone, amount) {
   const reference = genReference('DISB');
   const msisdn = normalizeMsisdn(phone);
+
+  if (mpesaMockMode()) {
+    await logTransaction({
+      type: TransactionType.disburse,
+      phone: msisdn || phone,
+      amount,
+      status: TransactionStatus.success,
+      reference,
+    });
+    return {
+      ok: true,
+      reference,
+      mock: true,
+      simulated: false,
+      mpesaAccepted: true,
+      responseCode: '0',
+      customerMessage: 'Accept the service request successfully.',
+      message: 'Mock B2C — no call to Safaricom (MPESA_MOCK_MODE=true).',
+    };
+  }
+
   let apiOk = false;
   let apiDetail = '';
   let parsed = null;
@@ -304,14 +333,47 @@ export async function disburseToVendor(phone, amount) {
 }
 
 /**
- * STK Push — repayment. Uses EAT timestamp for Password; optional MPESA_STK_MSISDN for test handset.
- * Returns stkAccountRef (12-char id sent as AccountReference) for callback correlation — see Postman C2B body.
+ * STK Push — repayment (PartyA / PhoneNumber = normalized `phone` argument).
+ * Caller should pass the number from POST /mpesa/repay `phone` or the user account phone.
+ * Optional env override: MPESA_STK_USE_ENV_MSISDN=true + MPESA_STK_MSISDN (server-side tests only).
  */
 export async function receiveRepayment(phone, amount) {
   const reference = genReference('REPAY');
   const stkAccountRef = stkAccountReferenceValue();
-  const stkPhone = process.env.MPESA_STK_MSISDN || phone;
-  const msisdn = normalizeMsisdn(stkPhone);
+  /** Caller passes the final handset (from POST /mpesa/repay JSON or account phone). */
+  const msisdn = normalizeMsisdn(phone);
+
+  if (mpesaMockMode()) {
+    const stkTimestamp = mpesaTimestampEAT();
+    const checkoutId = `ws_CO_${Date.now()}${crypto.randomBytes(2).toString('hex')}`;
+    const merchantReqId = `Partner names -${crypto.randomUUID()}`;
+    const postmanStyleResponse = {
+      MerchantRequestID: merchantReqId,
+      CheckoutRequestID: checkoutId,
+      ResponseCode: '0',
+      ResponseDescription: 'Success',
+      CustomerMessage: 'Success. Request accepted for processing',
+      MerchantCode: String(process.env.MPESA_SHORTCODE || '6564'),
+    };
+    return {
+      ok: true,
+      reference,
+      stkAccountRef,
+      mock: true,
+      stkInitiated: true,
+      simulated: false,
+      phoneUsed: msisdn,
+      timestampUsed: stkTimestamp,
+      responseCode: '0',
+      customerMessage: postmanStyleResponse.CustomerMessage,
+      checkoutRequestId: checkoutId,
+      merchantRequestId: merchantReqId,
+      postmanStyleResponse,
+      message:
+        'Mock STK — no call to Safaricom (MPESA_MOCK_MODE=true). Matches sandbox success JSON shape.',
+    };
+  }
+
   let apiOk = false;
   let apiDetail = '';
   let parsed = null;
@@ -399,7 +461,9 @@ export async function receiveRepayment(phone, amount) {
       else if (!shortcode || !passkey)
         apiDetail =
           'Missing MPESA_SHORTCODE or MPESA_PASSKEY (plain Lipa Na M-Pesa passkey from portal).';
-      else apiDetail = 'Missing phone / MSISDN.';
+      else if (!msisdn)
+        apiDetail =
+          'Missing or invalid phone — send "phone" in /mpesa/repay JSON (sandbox MSISDN) or use your account phone.';
     }
   } catch (e) {
     apiOk = false;
@@ -431,7 +495,7 @@ export async function receiveRepayment(phone, amount) {
       merchantRequestId: stkFields.merchantRequestId,
       message:
         apiDetail ||
-        'M-Pesa STK was not accepted. Check .env (keys, passkey, MPESA_STK_MSISDN) and try again.',
+        'M-Pesa STK was not accepted. Check .env (keys, passkey) and the phone in your request body (PartyA / PhoneNumber).',
     };
   }
 

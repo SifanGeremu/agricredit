@@ -366,12 +366,16 @@ export type MpesaRepaymentInfo = {
   checkoutRequestId?: string | null;
   displayHint?: string;
   responseCode?: string | null;
+  phoneUsed?: string;
+  mock?: boolean;
 };
 
 export const repayLoan = async (
   loanId: string,
   _channel?: RepaymentChannel,
-  amountOverride?: number
+  amountOverride?: number,
+  /** M-Pesa STK handset (Postman PhoneNumber / PartyA). Omitted → backend uses account phone. */
+  mpesaPhone?: string
 ): Promise<{
   success: boolean;
   message?: string;
@@ -389,9 +393,12 @@ export const repayLoan = async (
     if (amount <= 0 || !loan) {
       return { success: false, message: 'Nothing to repay on this loan.' };
     }
+    const payload: Record<string, unknown> = { loanId, amount };
+    const p = mpesaPhone != null ? String(mpesaPhone).trim() : '';
+    if (p) payload.phone = p;
     const body = await fetchJson('/mpesa/repay', {
       method: 'POST',
-      body: JSON.stringify({ loanId, amount }),
+      body: JSON.stringify(payload),
     });
     return {
       success: true,

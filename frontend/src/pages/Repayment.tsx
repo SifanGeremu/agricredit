@@ -18,6 +18,8 @@ export default function Repayment() {
   const [submitting, setSubmitting] = useState(false);
   const [loanId, setLoanId] = useState('');
   const [amount, setAmount] = useState<number>(0);
+  /** Sent as POST /mpesa/repay "phone" — same as Postman PartyA / PhoneNumber (STK prompt target). */
+  const [mpesaPhone, setMpesaPhone] = useState('');
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   const load = async () => {
@@ -49,6 +51,7 @@ export default function Repayment() {
       return;
     }
     setUser(u);
+    setMpesaPhone(String(u.phone ?? '').trim());
     void load();
   }, [navigate]);
 
@@ -81,7 +84,7 @@ export default function Repayment() {
     if (!loanId || amount <= 0) return;
     setSubmitting(true);
     setResult(null);
-    const r = await repayLoan(loanId, 'M-Pesa', amount);
+    const r = await repayLoan(loanId, 'M-Pesa', amount, mpesaPhone);
     setSubmitting(false);
     if (r.success) {
       const m = r.mpesa;
@@ -92,6 +95,7 @@ export default function Repayment() {
           : '';
       const lines = [
         r.message ?? 'M-Pesa request sent.',
+        m?.phoneUsed ? `STK sent to: ${m.phoneUsed}` : null,
         m?.stkInitiated && m?.checkoutRequestId
           ? `STK accepted — CheckoutRequestID: ${m.checkoutRequestId}`
           : null,
@@ -224,12 +228,23 @@ export default function Repayment() {
               </p>
             </div>
 
-            <div className="rounded-2xl bg-emerald-50/80 border border-emerald-100 px-4 py-3 text-sm text-emerald-900">
-              <span className="font-bold">Account phone:</span> {user.phone}
-              <br />
-              <span className="text-emerald-800/70">
-                STK uses <code className="text-xs">MPESA_STK_MSISDN</code> when set.
-              </span>
+            <div>
+              <label className="block text-sm font-bold text-emerald-900 mb-2">
+                M-Pesa phone (STK prompt)
+              </label>
+              <input
+                type="tel"
+                required
+                value={mpesaPhone}
+                onChange={(e) => setMpesaPhone(e.target.value)}
+                placeholder="e.g. 2517XXXXXXXX"
+                className="w-full bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 font-mono text-emerald-950"
+              />
+              <p className="text-xs text-emerald-800/60 mt-1">
+                Same value as Postman <code className="text-[0.65rem]">PhoneNumber</code> /{' '}
+                <code className="text-[0.65rem]">PartyA</code> — must match your sandbox-registered
+                SIM. Account: {user.phone}
+              </p>
             </div>
 
             <button
@@ -239,7 +254,8 @@ export default function Repayment() {
                 maxOwed < 1 ||
                 !Number.isFinite(amount) ||
                 amount < 1 ||
-                amount > maxOwed
+                amount > maxOwed ||
+                !String(mpesaPhone).trim()
               }
               className="w-full flex items-center justify-center gap-2 bg-emerald-600 text-white py-4 rounded-2xl font-bold text-lg hover:bg-emerald-700 disabled:opacity-50 shadow-lg shadow-emerald-200"
             >

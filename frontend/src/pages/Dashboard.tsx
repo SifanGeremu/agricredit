@@ -180,14 +180,21 @@ const FarmerRepaymentModal = ({
   isOpen,
   onClose,
   onPaid,
+  defaultPhone,
 }: {
   loan: Loan | null;
   isOpen: boolean;
   onClose: () => void;
-  onPaid: (channel: RepaymentChannel, amount: number) => void | Promise<void>;
+  onPaid: (
+    channel: RepaymentChannel,
+    amount: number,
+    mpesaPhone: string
+  ) => void | Promise<void>;
+  defaultPhone: string;
 }) => {
   const [busy, setBusy] = useState(false);
   const [payAmount, setPayAmount] = useState(0);
+  const [mpesaPhone, setMpesaPhone] = useState(defaultPhone);
 
   useEffect(() => {
     if (!loan) return;
@@ -196,6 +203,10 @@ const FarmerRepaymentModal = ({
     setPayAmount(dueAmt > 0 ? dueAmt : 0);
   }, [loan?.id, loan?.remainingBalance, loan?.amount]);
 
+  useEffect(() => {
+    setMpesaPhone(String(defaultPhone ?? '').trim());
+  }, [defaultPhone, loan?.id]);
+
   if (!isOpen || !loan) return null;
   const dueRaw = Number(loan.remainingBalance ?? loan.amount);
   const due = Number.isFinite(dueRaw) ? Math.max(0, Math.floor(dueRaw)) : 0;
@@ -203,7 +214,7 @@ const FarmerRepaymentModal = ({
     const amt = Math.min(Math.max(1, payAmount), Math.max(due, 1));
     setBusy(true);
     try {
-      await onPaid(ch, amt);
+      await onPaid(ch, amt, mpesaPhone.trim());
     } finally {
       setBusy(false);
     }
@@ -243,7 +254,15 @@ const FarmerRepaymentModal = ({
               const n = Number(v);
               if (Number.isFinite(n)) setPayAmount(Math.floor(n));
             }}
-            className="w-full mb-6 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 font-bold text-emerald-950"
+            className="w-full mb-4 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 font-bold text-emerald-950"
+          />
+          <label className="block text-sm font-bold text-emerald-900 mb-2">M-Pesa phone (STK)</label>
+          <input
+            type="tel"
+            value={mpesaPhone}
+            onChange={(e) => setMpesaPhone(e.target.value)}
+            placeholder="2517…"
+            className="w-full mb-6 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 font-mono text-emerald-950"
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
@@ -253,7 +272,8 @@ const FarmerRepaymentModal = ({
                 due < 1 ||
                 !Number.isFinite(payAmount) ||
                 payAmount < 1 ||
-                payAmount > due
+                payAmount > due ||
+                !mpesaPhone.trim()
               }
               onClick={() => void run('M-Pesa')}
               className="py-4 rounded-2xl border-2 border-emerald-600 bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50"
@@ -2831,9 +2851,10 @@ export default function Dashboard() {
         loan={repayModalLoan}
         isOpen={!!repayModalLoan}
         onClose={() => setRepayModalLoan(null)}
-        onPaid={async (channel, amount) => {
+        defaultPhone={user?.phone ?? ''}
+        onPaid={async (channel, amount, phone) => {
           if (!repayModalLoan) return;
-          const r = await repayLoan(repayModalLoan.id, channel, amount);
+          const r = await repayLoan(repayModalLoan.id, channel, amount, phone);
           if (r.success) {
             const m = r.mpesa;
             const lines = [
