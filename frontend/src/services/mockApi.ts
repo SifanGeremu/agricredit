@@ -53,6 +53,9 @@ function scaleCreditScore(n: number): number {
 }
 
 function mapLoanStatus(s: string): LoanStatus {
+  const key = String(s ?? '')
+    .trim()
+    .toLowerCase();
   const m: Record<string, LoanStatus> = {
     pending: 'Pending',
     approved: 'Approved',
@@ -61,7 +64,7 @@ function mapLoanStatus(s: string): LoanStatus {
     delivered: 'Delivered',
     repaid: 'Repaid',
   };
-  return m[s] || 'Pending';
+  return m[key] || 'Pending';
 }
 
 function mapFarmer(u: any): Farmer {
@@ -89,13 +92,22 @@ function mapFarmer(u: any): Farmer {
 function mapLoan(raw: any): Loan {
   const repayments = raw.repayments || [];
   const st = String(raw.status || '').toLowerCase();
+  const paid = repayments
+    .filter((r: { status?: string }) => String(r.status).toLowerCase() === 'success')
+    .reduce((s: number, r: { amount: number }) => {
+      const a = Number(r.amount);
+      return s + (Number.isFinite(a) ? a : 0);
+    }, 0);
+  const amountNum = Number(raw.amount);
+  const principal = Number.isFinite(amountNum) ? amountNum : 0;
+  const remainingBalance = Math.max(0, principal - paid);
   return {
     id: raw.id,
     farmerId: raw.userId,
     vendorId: raw.vendorId || '',
     productId: raw.productId || '',
     productName: raw.productName || raw.purpose || 'Loan',
-    amount: raw.amount,
+    amount: principal,
     status: mapLoanStatus(raw.status),
     createdAt: raw.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString(),
     repaymentDate: st === 'repaid' ? new Date(raw.updatedAt).toISOString() : undefined,
@@ -106,7 +118,20 @@ function mapLoan(raw: any): Loan {
         : undefined,
     dueReminderSent: undefined,
     repaymentMethod: undefined,
+    remainingBalance,
   };
+}
+
+/** Same farmer as loan owner (IDs from API / Mongo may differ in type). */
+export function loanBelongsToFarmer(loan: Loan, farmerId: string): boolean {
+  return String(loan.farmerId) === String(farmerId);
+}
+
+/** Delivered and still has balance — show Repay. */
+export function canFarmerRepayLoan(loan: Loan): boolean {
+  if (String(loan.status).toLowerCase() !== 'delivered') return false;
+  const bal = Number(loan.remainingBalance ?? loan.amount);
+  return Number.isFinite(bal) && bal >= 1;
 }
 
 export const syncFarmerRepaymentDueReminders = async (_farmerId: string): Promise<void> => {
@@ -315,7 +340,7 @@ export const requestLoan = async (
   amount: number
 ): Promise<{ success: boolean; message?: string }> => {
   try {
-    await fetchJson('/loan/request', {
+    const body = await fetchJson('/loan/request', {
       method: 'POST',
       body: JSON.stringify({
         vendorId,
@@ -323,20 +348,62 @@ export const requestLoan = async (
         amount,
       }),
     });
-    return { success: true };
+    return { success: true, message: body.message };
   } catch (e: unknown) {
     return { success: false, message: e instanceof Error ? e.message : 'Request failed' };
   }
 };
 
-export const repayLoan = async (loanId: string, channel?: RepaymentChannel): Promise<void> => {
-  const loans = await getLoans();
-  const loan = loans.find((l) => l.id === loanId);
-  const amount = loan?.amount ?? 0;
-  await fetchJson('/mpesa/repay', {
-    method: 'POST',
-    body: JSON.stringify({ loanId, amount }),
-  });
+/** M-Pesa block returned from POST /mpesa/repay (STK + local record). */
+export type MpesaRepaymentInfo = {
+  ok?: boolean;
+  reference?: string;
+  stkAccountRef?: string;
+  simulated?: boolean;
+  stkInitiated?: boolean;
+  message?: string;
+  customerMessage?: string | null;
+  checkoutRequestId?: string | null;
+  displayHint?: string;
+  responseCode?: string | null;
+};
+
+export const repayLoan = async (
+  loanId: string,
+  _channel?: RepaymentChannel,
+  amountOverride?: number
+): Promise<{
+  success: boolean;
+  message?: string;
+  mpesa?: MpesaRepaymentInfo;
+}> => {
+  try {
+    const loans = await getLoans();
+    const loan = loans.find((l) => l.id === loanId);
+    const max = loan?.remainingBalance ?? loan?.amount ?? 0;
+    let amount =
+      amountOverride != null && Number(amountOverride) > 0
+        ? Number(amountOverride)
+        : max;
+    if (amount > max) amount = max;
+    if (amount <= 0 || !loan) {
+      return { success: false, message: 'Nothing to repay on this loan.' };
+    }
+    const body = await fetchJson('/mpesa/repay', {
+      method: 'POST',
+      body: JSON.stringify({ loanId, amount }),
+    });
+    return {
+      success: true,
+      message: body.message,
+      mpesa: body.data?.mpesa,
+    };
+  } catch (e: unknown) {
+    return {
+      success: false,
+      message: e instanceof Error ? e.message : 'Repayment failed',
+    };
+  }
 };
 
 export const addProduct = async (product: Partial<Product>): Promise<void> => {
@@ -384,10 +451,13 @@ export const approveLoan = async (loanId: string): Promise<void> => {
   await fetchJson(`/admin/loan/${loanId}/approve`, { method: 'POST' });
   try {
     await fetchJson(`/admin/loan/${loanId}/disburse`, { method: 'POST' });
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : '';
-    if (!msg.includes('vendor') && !msg.includes('Vendor')) throw e;
+  } catch {
+    /* Disburse often fails in sandbox (M-Pesa B2C). Loan stays Approved — use Disburse again from Admin → Loans. */
   }
+};
+
+export const disburseLoan = async (loanId: string): Promise<void> => {
+  await fetchJson(`/admin/loan/${loanId}/disburse`, { method: 'POST' });
 };
 
 export const rejectLoan = async (loanId: string): Promise<void> => {

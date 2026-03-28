@@ -5,7 +5,7 @@ import {
   rejectionReasonForLowScore,
 } from '../services/creditService.js';
 import { assignFarmerToGroup } from '../services/groupService.js';
-import { hasBlockingLoan, addMonths } from '../services/loanRules.js';
+import { hasBlockingLoan } from '../services/loanRules.js';
 import { LoanStatus } from '../lib/db.js';
 import { notifyUser } from '../services/notifications.js';
 
@@ -90,10 +90,6 @@ export async function requestLoan(req, res, next) {
       vendorId: vendorId || null,
     };
 
-    if (status === LoanStatus.approved) {
-      data.dueDate = addMonths(new Date(), 3);
-    }
-
     const loan = await prisma.loan.create({ data });
 
     if (vendorId) {
@@ -112,10 +108,8 @@ export async function requestLoan(req, res, next) {
       success: true,
       message:
         status === LoanStatus.rejected
-          ? 'Loan request declined based on credit score.'
-          : status === LoanStatus.approved
-            ? 'Loan pre-approved. Admin will disburse funds to the vendor when ready.'
-            : 'Loan submitted and pending admin review.',
+          ? 'Loan request declined — credit score is below the minimum threshold (38).'
+          : 'Loan submitted and is pending admin approval.',
       data: { loan },
     });
   } catch (e) {

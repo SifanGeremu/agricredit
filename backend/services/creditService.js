@@ -1,20 +1,19 @@
 import { LoanStatus } from '../lib/db.js';
 
 /**
- * Credit rules at loan request time:
- * - < 50  → rejected
- * - 50–70 → pending (needs admin)
- * - > 70  → approved (pre-approved by score; admin still disburses funds)
+ * New loan requests always start as pending until an admin approves.
+ * Only critically low scores are auto-rejected.
  */
 export function loanStatusFromCreditScore(score) {
-  if (score < 50) return LoanStatus.rejected;
-  if (score <= 70) return LoanStatus.pending;
-  return LoanStatus.approved;
+  const s = Number(score) || 0;
+  if (s < 38) return LoanStatus.rejected;
+  return LoanStatus.pending;
 }
 
 export function rejectionReasonForLowScore(score) {
-  if (score < 50) {
-    return 'Credit score below minimum threshold (50).';
+  const s = Number(score) || 0;
+  if (s < 38) {
+    return 'Credit score below minimum threshold (38).';
   }
   return null;
 }

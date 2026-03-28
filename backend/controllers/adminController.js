@@ -106,6 +106,12 @@ export async function disburseLoan(req, res, next) {
     }
     const phone = loan.vendor.walletNumber || loan.vendor.phone;
     const mpesa = await disburseToVendor(phone, loan.amount);
+    if (!mpesa.ok) {
+      throw new AppError(
+        mpesa.message || 'M-Pesa B2C failed — loan was not marked disbursed.',
+        502,
+      );
+    }
     const updated = await prisma.loan.update({
       where: { id },
       data: { status: LoanStatus.disbursed },

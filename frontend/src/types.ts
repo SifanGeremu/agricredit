@@ -64,6 +64,8 @@ export interface Loan {
   /** One-time due reminder already sent */
   dueReminderSent?: boolean;
   repaymentMethod?: RepaymentChannel;
+  /** Amount left to repay (from API repayments) */
+  remainingBalance?: number;
 }
 
 export interface Group {

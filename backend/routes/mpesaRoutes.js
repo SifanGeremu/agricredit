@@ -17,4 +17,8 @@ const repayRules = [
 
 router.post('/repay', authenticate, requireRole('user'), repayRules, validateRequest, asyncHandler(mpesa.repayLoan));
 
+router.post('/webhook/stk', asyncHandler(mpesa.stkWebhook));
+
+router.post('/dev/confirm-stk', asyncHandler(mpesa.devConfirmStk));
+
 export default router;

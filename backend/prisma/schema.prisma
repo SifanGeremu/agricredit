@@ -67,7 +67,7 @@ model User {
   accountStatus  UserAccountStatus @default(active)
   groupId        String?           @db.ObjectId
   group          Group?            @relation(fields: [groupId], references: [id])
-  creditScore    Int               @default(50)
+  creditScore    Int               @default(58)
   farmSize       String?
   cropType       String?
   location       String?

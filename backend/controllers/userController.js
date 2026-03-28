@@ -30,6 +30,7 @@ export async function listVendors(req, res, next) {
     const mapped = vendors.map((v) => ({
       ...v,
       businessName: v.name,
+      status: 'active',
     }));
     res.json({ success: true, data: { vendors: mapped } });
   } catch (e) {

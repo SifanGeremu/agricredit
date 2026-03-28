@@ -1,0 +1,7 @@
+Run once: cd backend && npm run seed
+
+Same password for every demo user: demo1234
+
+ADMIN   phone 1111111111
+VENDOR  phone 2222222222
+FARMER  phone 3333333333  → after login you go straight to M-Pesa STK repayment (loan is Delivered)

@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { 
   Leaf, LogOut, TrendingUp, Users, CreditCard, Sprout, 
@@ -18,11 +18,14 @@ import {
 import { 
   getFarmers, getVendors, getLoans, getProducts, getGroups, 
   requestLoan, repayLoan, addProduct, updateOrderStatus, approveVendor, approveLoan,
+  disburseLoan,
   getNotifications, rejectLoan, rejectVendor, deleteProduct, updateProduct,
   updateFarmerStatus, deleteVendor, markAllNotificationsRead,
   vendorBlockFarmer, vendorUnblockFarmer, getBlockedFarmerIdsForVendor,
   getBlockedVendorIdsForFarmer,
-  syncFarmerRepaymentDueReminders
+  syncFarmerRepaymentDueReminders,
+  canFarmerRepayLoan,
+  loanBelongsToFarmer,
 } from '../services/mockApi';
 import { Farmer, Vendor, Admin, Loan, Product, Group, Notification, RepaymentChannel } from '../types';
 
@@ -106,11 +109,22 @@ const Sidebar = ({ role, activeTab, setActiveTab, onLogout }: any) => {
             </div>
           </>
         ) : (
-          items.map((item: { id: string; label: string; icon: React.ReactNode }) => (
-            <div key={item.id}>
-              <NavButton item={item} />
-            </div>
-          ))
+          <>
+            {items.map((item: { id: string; label: string; icon: React.ReactNode }) => (
+              <div key={item.id}>
+                <NavButton item={item} />
+              </div>
+            ))}
+            {role === 'farmer' && (
+              <Link
+                to="/repayment"
+                className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-emerald-100/80 hover:bg-emerald-800 hover:text-white transition-all border border-emerald-800/80"
+              >
+                <Smartphone className="w-5 h-5 shrink-0" />
+                <span className="font-medium text-left">M-Pesa repay</span>
+              </Link>
+            )}
+          </>
         )}
       </nav>
       <div className="p-4 border-t border-emerald-800">
@@ -170,9 +184,30 @@ const FarmerRepaymentModal = ({
   loan: Loan | null;
   isOpen: boolean;
   onClose: () => void;
-  onPaid: (channel: RepaymentChannel) => void;
+  onPaid: (channel: RepaymentChannel, amount: number) => void | Promise<void>;
 }) => {
+  const [busy, setBusy] = useState(false);
+  const [payAmount, setPayAmount] = useState(0);
+
+  useEffect(() => {
+    if (!loan) return;
+    const raw = Number(loan.remainingBalance ?? loan.amount);
+    const dueAmt = Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+    setPayAmount(dueAmt > 0 ? dueAmt : 0);
+  }, [loan?.id, loan?.remainingBalance, loan?.amount]);
+
   if (!isOpen || !loan) return null;
+  const dueRaw = Number(loan.remainingBalance ?? loan.amount);
+  const due = Number.isFinite(dueRaw) ? Math.max(0, Math.floor(dueRaw)) : 0;
+  const run = async (ch: RepaymentChannel) => {
+    const amt = Math.min(Math.max(1, payAmount), Math.max(due, 1));
+    setBusy(true);
+    try {
+      await onPaid(ch, amt);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="fixed inset-0 bg-emerald-950/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
       <motion.div
@@ -186,26 +221,56 @@ const FarmerRepaymentModal = ({
               <Smartphone className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-emerald-900">Mobile money repayment</h2>
-              <p className="text-sm text-emerald-800/60">Demo — simulate M-Pesa or Telebirr</p>
+              <h2 className="text-xl font-bold text-emerald-900">Repayment</h2>
+              <p className="text-sm text-emerald-800/60">Amount below → then M-Pesa STK</p>
             </div>
           </div>
-          <p className="text-emerald-800/80 text-sm mb-6">
-            Pay <strong className="text-emerald-900">₦{loan.amount.toLocaleString()}</strong> for{' '}
-            <strong>{loan.productName}</strong>. Your credit score will increase after confirmation.
+          <p className="text-emerald-800/80 text-sm mb-4">
+            <strong>{loan.productName}</strong> · max ₦{due.toLocaleString()}
           </p>
+          <label className="block text-sm font-bold text-emerald-900 mb-2">Amount (₦)</label>
+          <input
+            type="number"
+            min={1}
+            max={due || undefined}
+            value={Number.isFinite(payAmount) ? payAmount : 0}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === '') {
+                setPayAmount(0);
+                return;
+              }
+              const n = Number(v);
+              if (Number.isFinite(n)) setPayAmount(Math.floor(n));
+            }}
+            className="w-full mb-6 bg-emerald-50 border border-emerald-100 rounded-2xl px-4 py-3 font-bold text-emerald-950"
+          />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => onPaid('M-Pesa')}
-              className="py-4 rounded-2xl border-2 border-emerald-200 font-bold text-emerald-900 hover:bg-emerald-50 transition-colors"
+              disabled={
+                busy ||
+                due < 1 ||
+                !Number.isFinite(payAmount) ||
+                payAmount < 1 ||
+                payAmount > due
+              }
+              onClick={() => void run('M-Pesa')}
+              className="py-4 rounded-2xl border-2 border-emerald-600 bg-emerald-600 text-white font-bold hover:bg-emerald-700 transition-colors disabled:opacity-50"
             >
-              M-Pesa
+              {busy ? 'Processing…' : 'M-Pesa STK'}
             </button>
             <button
               type="button"
-              onClick={() => onPaid('Telebirr')}
-              className="py-4 rounded-2xl border-2 border-emerald-200 font-bold text-emerald-900 hover:bg-emerald-50 transition-colors"
+              disabled={
+                busy ||
+                due < 1 ||
+                !Number.isFinite(payAmount) ||
+                payAmount < 1 ||
+                payAmount > due
+              }
+              onClick={() => void run('Telebirr')}
+              className="py-4 rounded-2xl border-2 border-emerald-200 font-bold text-emerald-900 hover:bg-emerald-50 transition-colors disabled:opacity-50"
             >
               Telebirr
             </button>
@@ -366,11 +431,11 @@ const FarmerOverview = ({
                     >
                       {loan.status}
                     </span>
-                    {loan.status === 'Delivered' && (
+                    {canFarmerRepayLoan(loan) && (
                       <button
                         type="button"
                         onClick={() => onRepayClick(loan)}
-                        className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 flex items-center gap-2"
+                        className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-emerald-700 flex items-center gap-2 cursor-pointer"
                       >
                         <Smartphone className="w-4 h-4" />
                         Repay with mobile money
@@ -1302,14 +1367,16 @@ const AdminDashboard = ({
                   </div>
                   <div className="flex gap-2">
                     <button
+                      type="button"
                       onClick={() => approveLoan(loan.id).then(onRefresh)}
-                      className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                      className="bg-emerald-600 text-white px-3 py-1 rounded-lg text-xs font-bold cursor-pointer"
                     >
                       Approve
                     </button>
                     <button
+                      type="button"
                       onClick={() => rejectLoan(loan.id).then(onRefresh)}
-                      className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-bold"
+                      className="bg-red-100 text-red-600 px-3 py-1 rounded-lg text-xs font-bold cursor-pointer"
                     >
                       Reject
                     </button>
@@ -1650,6 +1717,7 @@ const AdminLoansView = ({
   loans,
   groups,
   onApprove,
+  onDisburse,
   onReject,
 }: {
   farmers: Farmer[];
@@ -1657,6 +1725,7 @@ const AdminLoansView = ({
   loans: Loan[];
   groups: Group[];
   onApprove: (id: string) => void;
+  onDisburse: (id: string) => void;
   onReject: (id: string) => void;
 }) => {
   const [filter, setFilter] = useState<string>('all');
@@ -1775,24 +1844,44 @@ const AdminLoansView = ({
                   </td>
                   <td className="px-6 py-4 text-right">
                     {loan.status === 'Pending' ? (
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-2 flex-wrap">
                         <button
+                          type="button"
                           onClick={() => onApprove(loan.id)}
-                          className="text-emerald-600 font-bold text-sm"
+                          className="text-emerald-600 font-bold text-sm hover:underline cursor-pointer"
                         >
                           Approve
                         </button>
                         <button
+                          type="button"
                           onClick={() => onReject(loan.id)}
-                          className="text-red-600 font-bold text-sm"
+                          className="text-red-600 font-bold text-sm hover:underline cursor-pointer"
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : loan.status === 'Approved' ? (
+                      <div className="flex justify-end gap-2 flex-wrap items-center">
+                        <button
+                          type="button"
+                          onClick={() => onDisburse(loan.id)}
+                          className="bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-emerald-700 cursor-pointer"
+                        >
+                          Disburse
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onReject(loan.id)}
+                          className="text-red-600 font-bold text-xs hover:underline cursor-pointer"
                         >
                           Reject
                         </button>
                       </div>
                     ) : loan.status !== 'Repaid' && loan.status !== 'Rejected' ? (
                       <button
+                        type="button"
                         onClick={() => onReject(loan.id)}
-                        className="text-red-600 font-bold text-xs"
+                        className="text-red-600 font-bold text-xs hover:underline cursor-pointer"
                       >
                         Reject (override)
                       </button>
@@ -2281,6 +2370,7 @@ export default function Dashboard() {
   });
   const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
   const [loanRequestError, setLoanRequestError] = useState<string | null>(null);
+  const [submissionNotice, setSubmissionNotice] = useState<string | null>(null);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -2351,6 +2441,11 @@ export default function Dashboard() {
 
   if (!user) return null;
 
+  const farmerLoans =
+    user.role === 'farmer'
+      ? data.loans.filter((l: Loan) => loanBelongsToFarmer(l, user.id))
+      : [];
+
   return (
     <div className="min-h-screen bg-emerald-50/30 flex">
       <Sidebar 
@@ -2360,7 +2455,19 @@ export default function Dashboard() {
         onLogout={handleLogout} 
       />
       
-      <div className="flex-1 ml-64 p-8">
+      <div className="flex-1 ml-64 p-8 relative z-10 min-w-0">
+        {submissionNotice && (
+          <div className="mb-6 flex items-start justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900">
+            <span className="whitespace-pre-line">{submissionNotice}</span>
+            <button
+              type="button"
+              className="shrink-0 font-bold text-emerald-700 hover:text-emerald-950"
+              onClick={() => setSubmissionNotice(null)}
+            >
+              ×
+            </button>
+          </div>
+        )}
         <header className="flex justify-between items-center mb-12">
           <div>
             <h1 className="text-3xl font-bold text-emerald-950">
@@ -2453,7 +2560,7 @@ export default function Dashboard() {
             {activeTab === 'overview' && (
               <FarmerOverview
                 farmer={user}
-                loans={data.loans.filter((l: Loan) => l.farmerId === user.id)}
+                loans={farmerLoans}
                 group={data.groups.find((g: Group) => g.id === user.groupId)}
                 onRepayClick={(loan) => setRepayModalLoan(loan)}
               />
@@ -2484,7 +2591,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-emerald-50">
-                      {data.loans.filter((l: Loan) => l.farmerId === user.id).length > 0 ? data.loans.filter((l: Loan) => l.farmerId === user.id).map((loan: Loan) => (
+                      {farmerLoans.length > 0 ? farmerLoans.map((loan: Loan) => (
                         <tr key={loan.id}>
                           <td className="px-6 py-4 font-medium">{loan.productName}</td>
                           <td className="px-6 py-4">₦{loan.amount.toLocaleString()}</td>
@@ -2493,11 +2600,11 @@ export default function Dashboard() {
                           </td>
                           <td className="px-6 py-4 text-sm text-emerald-800/60">{new Date(loan.createdAt).toLocaleDateString()}</td>
                           <td className="px-6 py-4 text-right">
-                            {loan.status === 'Delivered' && (
+                            {canFarmerRepayLoan(loan) && (
                               <button
                                 type="button"
                                 onClick={() => setRepayModalLoan(loan)}
-                                className="text-sm font-bold text-emerald-600 hover:underline"
+                                className="text-sm font-bold text-emerald-600 hover:underline cursor-pointer"
                               >
                                 Repay
                               </button>
@@ -2665,6 +2772,13 @@ export default function Dashboard() {
                 loans={data.loans}
                 groups={data.groups}
                 onApprove={(id) => approveLoan(id).then(() => void refreshData())}
+                onDisburse={(id) =>
+                  disburseLoan(id)
+                    .then(() => void refreshData())
+                    .catch((e) =>
+                      alert(e instanceof Error ? e.message : 'Disburse failed — check M-Pesa B2C .env'),
+                    )
+                }
                 onReject={(id) => rejectLoan(id).then(() => void refreshData())}
               />
             )}
@@ -2704,6 +2818,7 @@ export default function Dashboard() {
           const res = await requestLoan(user.id, vId, pId, amt);
           if (res.success) {
             setLoanRequestError(null);
+            setSubmissionNotice(res.message ?? 'Loan request submitted.');
             setIsLoanModalOpen(false);
             void refreshData();
           } else {
@@ -2716,12 +2831,26 @@ export default function Dashboard() {
         loan={repayModalLoan}
         isOpen={!!repayModalLoan}
         onClose={() => setRepayModalLoan(null)}
-        onPaid={(channel) => {
+        onPaid={async (channel, amount) => {
           if (!repayModalLoan) return;
-          repayLoan(repayModalLoan.id, channel).then(() => {
+          const r = await repayLoan(repayModalLoan.id, channel, amount);
+          if (r.success) {
+            const m = r.mpesa;
+            const lines = [
+              r.message ?? 'Paid.',
+              m?.stkInitiated && m?.checkoutRequestId
+                ? `STK accepted — CheckoutRequestID: ${m.checkoutRequestId}`
+                : null,
+              m?.customerMessage ? `Safaricom: ${m.customerMessage}` : null,
+              m?.displayHint ?? null,
+              `Ref: ${m?.reference ?? '—'}${m?.simulated ? ' (demo STK fallback)' : ''}`,
+            ].filter(Boolean) as string[];
+            setSubmissionNotice(lines.join('\n'));
             setRepayModalLoan(null);
             void refreshData();
-          });
+          } else {
+            alert(r.message ?? 'Repayment failed');
+          }
         }}
       />
 

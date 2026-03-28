@@ -30,7 +30,11 @@ export default function Login() {
           localStorage.setItem('agri_token', response.token);
         }
         localStorage.setItem('agri_user', JSON.stringify(response.user));
-        navigate('/dashboard');
+        if (response.user.role === 'farmer') {
+          navigate('/repayment');
+        } else {
+          navigate('/dashboard');
+        }
       } else {
         setError(response.message || 'Invalid credentials.');
       }
