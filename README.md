@@ -189,11 +189,7 @@ This codebase was created for **East Ethiopia’s biggest Cursor hackathon**—h
 | `frontend/` | `npm run dev` | Vite dev server (port 3000) |
 | `frontend/` | `npm run build` | Production build |
 
----
 
-## License
-
-Specify your license here (e.g. MIT) or your hackathon’s terms. Until then, all rights reserved by the authors unless stated otherwise.
 
 ---
 
