@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { receiveRepayment, logTransaction } from '../services/mpesaService.js';
+import { receiveRepayment, logTransaction, stkPushFromPayload, probeMpesaOAuth } from '../services/mpesaService.js';
 import { increaseCreditAfterRepayment } from '../services/creditService.js';
 import { smsLoanRepaid } from '../services/smsSimulator.js';
 import {
@@ -41,7 +41,9 @@ function resolveStkDestinationPhone(req) {
     return envMsisdn.trim();
   }
   if (rawBody) {
-    const allowMismatch = process.env.MPESA_STK_ALLOW_PHONE_MISMATCH === 'true';
+    // Demo-friendly default: allow entering a sandbox-registered handset even if account phone differs.
+    // Set MPESA_STK_ALLOW_PHONE_MISMATCH=false to enforce match.
+    const allowMismatch = process.env.MPESA_STK_ALLOW_PHONE_MISMATCH !== 'false';
     if (!allowMismatch && digitsOnly(rawBody) !== digitsOnly(accountPhone)) {
       throw new AppError(
         'M-Pesa phone must match your account phone (or set MPESA_STK_ALLOW_PHONE_MISMATCH=true for sandbox test handsets).',
@@ -199,87 +201,50 @@ export async function repayLoan(req, res, next) {
       );
     }
 
-    const defer =
-      deferRepaymentUntilCallback() &&
-      mpesa.stkInitiated &&
-      !mpesa.simulated &&
-      !mpesa.mock;
+    // Real STK flow: only an accepted STK push should proceed. If STK wasn't initiated
+    // (e.g., simulated fallback / misconfig), do not auto-mark loans as repaid.
+    if (!mpesa.stkInitiated || mpesa.simulated || mpesa.mock) {
+      throw new AppError(
+        mpesa.message ||
+          'STK Push was not accepted by Safaricom — no repayment recorded.',
+        502,
+      );
+    }
 
     const mpesaSummary =
       mpesa.stkInitiated && mpesa.checkoutRequestId
         ? `M-Pesa STK accepted (prompt sent). ${mpesa.customerMessage || ''} CheckoutRequestID: ${mpesa.checkoutRequestId}. Ref: ${mpesa.reference}.`
         : `${mpesa.message} Ref: ${mpesa.reference}.`;
 
-    if (defer) {
-      const repayment = await prisma.repayment.create({
-        data: {
-          loanId: loan.id,
-          amount,
-          status: RepaymentStatus.pending,
-          transactionRef: mpesa.stkAccountRef,
-        },
-      });
-
-      return res.json({
-        success: true,
-        message: `STK sent to your phone. Loan stays open until Safaricom confirms payment on your CallBackURL. ${mpesaSummary}`,
-        data: {
-          repayment,
-          mpesa: {
-            ...mpesa,
-            displayHint:
-              'Complete the prompt on your handset. The loan balance updates when the STK callback confirms payment (POST /mpesa/webhook/stk). For local testing use POST /mpesa/dev/confirm-stk with { "transactionRef": "<stkAccountRef>" }.',
-          },
-          loan,
-        },
-      });
+    // Correct STK behavior: record as pending and finalize ONLY on callback.
+    // (MPESA_RECORD_REPAYMENT_ON_CALLBACK_ONLY is kept for backwards compatibility, but the safe
+    // default is callback-only.)
+    if (!deferRepaymentUntilCallback()) {
+      throw new AppError(
+        'Server misconfigured: MPESA_RECORD_REPAYMENT_ON_CALLBACK_ONLY must be true for real STK flow.',
+        500,
+      );
     }
 
     const repayment = await prisma.repayment.create({
       data: {
         loanId: loan.id,
         amount,
-        status: RepaymentStatus.success,
+        status: RepaymentStatus.pending,
         transactionRef: mpesa.stkAccountRef,
       },
     });
-
-    await logTransaction({
-      type: TransactionType.repay,
-      phone: mpesa.phoneUsed || stkPhone,
-      amount,
-      status: TransactionStatus.success,
-      reference: mpesa.reference,
-    });
-
-    const newTotal = paidSoFar + amount;
-    let loanUpdated = loan;
-    if (newTotal >= loan.amount) {
-      loanUpdated = await prisma.loan.update({
-        where: { id: loan.id },
-        data: { status: LoanStatus.repaid },
-      });
-      await increaseCreditAfterRepayment(prisma, userId, 20);
-      smsLoanRepaid(req.user.phone, loan.amount);
-    }
-
-    const loanDone = newTotal >= loan.amount;
-    res.json({
+    return res.json({
       success: true,
-      message: loanDone
-        ? `Loan fully repaid. Credit score +20. ${mpesaSummary}`
-        : `Partial repayment recorded. ${mpesaSummary}`,
+      message: `STK sent to your phone. Loan stays open until Safaricom confirms payment on your CallBackURL. ${mpesaSummary}`,
       data: {
         repayment,
         mpesa: {
           ...mpesa,
-          displayHint: mpesa.stkInitiated
-            ? 'Check your phone for the M-Pesa prompt. Final status also arrives at your CallBackURL.'
-            : mpesa.simulated
-              ? 'Demo fallback: STK did not confirm from Safaricom; repayment was still saved because MPESA_ALLOW_SIMULATED_FALLBACK=true.'
-              : mpesa.message,
+          displayHint:
+            'Complete the prompt on your handset. The loan balance updates when the STK callback confirms payment (POST /mpesa/webhook/stk).',
         },
-        loan: loanUpdated,
+        loan,
       },
     });
   } catch (e) {
@@ -350,6 +315,52 @@ export async function devConfirmStk(req, res, next) {
       success: true,
       message: 'Pending repayment marked successful (dev / manual confirm).',
       data: { loan: out.loan },
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/**
+ * Thin STK forwarder (push prompt only): forwards the exact JSON payload you used in Postman
+ * to the configured Safaricom STK endpoint using backend OAuth.
+ */
+export async function stkPushRaw(req, res, next) {
+  try {
+    const payload = req.body;
+    const out = await stkPushFromPayload(payload);
+    if (!out.ok) {
+      throw new AppError(out.message || 'STK push failed', 502);
+    }
+    res.json({
+      success: true,
+      message: out.message || 'STK push accepted.',
+      data: { mpesa: out },
+    });
+  } catch (e) {
+    next(e);
+  }
+}
+
+/** Quick config/status check (does not initiate payment). */
+export async function mpesaStatus(req, res, next) {
+  try {
+    const base = String(process.env.MPESA_BASE_URL || '').trim();
+    const out = await probeMpesaOAuth();
+    res.json({
+      success: true,
+      data: {
+        baseUrl: base || null,
+        mockMode: process.env.MPESA_MOCK_MODE === 'true',
+        allowSimulatedFallback: process.env.MPESA_ALLOW_SIMULATED_FALLBACK === 'true',
+        recordOnCallbackOnly: process.env.MPESA_RECORD_REPAYMENT_ON_CALLBACK_ONLY !== 'false',
+        hasConsumerKey: Boolean(process.env.MPESA_CONSUMER_KEY),
+        hasConsumerSecret: Boolean(process.env.MPESA_CONSUMER_SECRET),
+        hasShortcode: Boolean(process.env.MPESA_SHORTCODE),
+        hasPasskey: Boolean(process.env.MPESA_PASSKEY),
+        stkCallbackUrl: process.env.MPESA_STK_CALLBACK_URL || process.env.MPESA_CALLBACK_URL || null,
+        oauth: out,
+      },
     });
   } catch (e) {
     next(e);

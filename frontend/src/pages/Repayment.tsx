@@ -5,9 +5,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, Leaf, Loader2, Smartphone, CreditCard } from 'lucide-react';
-import { getLoans, repayLoan } from '../services/mockApi';
+import { ArrowLeft, Leaf, Loader2, Smartphone, CreditCard, PlusCircle } from 'lucide-react';
+import { confirmLoanReceived, createRepayDemoLoan, getLoans, repayLoan } from '../services/mockApi';
 import type { Loan } from '../types';
+
+const SHOW_DEMO_TOOLS = import.meta.env.VITE_ENABLE_DEMO_TOOLS === 'true';
 
 export default function Repayment() {
   const navigate = useNavigate();
@@ -21,6 +23,8 @@ export default function Repayment() {
   /** Sent as POST /mpesa/repay "phone" — same as Postman PartyA / PhoneNumber (STK prompt target). */
   const [mpesaPhone, setMpesaPhone] = useState('');
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [creatingDemo, setCreatingDemo] = useState(false);
+  const [confirmingReceivedId, setConfirmingReceivedId] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -164,15 +168,62 @@ export default function Repayment() {
                 <strong>Admin approve</strong> → <strong>Disburse</strong> (Loans table) → vendor{' '}
                 <strong>Confirm delivery</strong> → then return here.
               </p>
+              {SHOW_DEMO_TOOLS && (
+                <button
+                  type="button"
+                  disabled={creatingDemo}
+                  onClick={async () => {
+                    setCreatingDemo(true);
+                    setResult(null);
+                    const out = await createRepayDemoLoan();
+                    setCreatingDemo(false);
+                    if (out.success) {
+                      setResult({ ok: true, text: out.message || 'Demo loan created. You can repay now.' });
+                      await load();
+                    } else {
+                      setResult({ ok: false, text: out.message || 'Failed to create demo loan.' });
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-2 mb-4 bg-emerald-600 text-white py-3 rounded-2xl font-bold hover:bg-emerald-700 disabled:opacity-50 shadow-lg shadow-emerald-200"
+                >
+                  {creatingDemo ? <Loader2 className="w-5 h-5 animate-spin" /> : <PlusCircle className="w-5 h-5" />}
+                  {creatingDemo ? 'Creating demo loan…' : 'Create demo Delivered loan'}
+                </button>
+              )}
               {allLoans.length > 0 ? (
                 <ul className="space-y-2 border-t border-emerald-100 pt-4">
                   {allLoans.map((l) => (
                     <li
                       key={l.id}
-                      className="flex justify-between gap-2 text-emerald-900 font-medium"
+                      className="flex justify-between gap-2 text-emerald-900 font-medium items-center"
                     >
-                      <span>{l.productName}</span>
-                      <span className="text-xs uppercase tracking-wide text-emerald-600">{l.status}</span>
+                      <div className="min-w-0">
+                        <div className="truncate">{l.productName}</div>
+                        {String(l.status).toLowerCase() === 'paid to vendor' && (
+                          <button
+                            type="button"
+                            disabled={confirmingReceivedId === l.id}
+                            onClick={async () => {
+                              setConfirmingReceivedId(l.id);
+                              setResult(null);
+                              const out = await confirmLoanReceived(l.id);
+                              setConfirmingReceivedId(null);
+                              if (out.success) {
+                                setResult({ ok: true, text: out.message || 'Receipt confirmed. You can repay now.' });
+                                await load();
+                              } else {
+                                setResult({ ok: false, text: out.message || 'Could not confirm receipt.' });
+                              }
+                            }}
+                            className="mt-1 text-xs font-bold text-emerald-700 hover:text-emerald-900 underline disabled:opacity-50"
+                          >
+                            {confirmingReceivedId === l.id ? 'Confirming…' : 'Confirm received (unlock repay)'}
+                          </button>
+                        )}
+                      </div>
+                      <span className="text-xs uppercase tracking-wide text-emerald-600 shrink-0">
+                        {l.status}
+                      </span>
                     </li>
                   ))}
                 </ul>

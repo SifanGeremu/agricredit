@@ -12,5 +12,7 @@ router.get('/loans', asyncHandler(user.getMyLoans));
 router.get('/group', asyncHandler(user.getMyGroup));
 router.get('/catalog/products', asyncHandler(user.listCatalogProducts));
 router.get('/blocked-vendors', asyncHandler(user.listBlockedVendorIds));
+router.post('/loan/:id/confirm-received', asyncHandler(user.confirmReceived));
+router.post('/dev/create-repay-demo-loan', asyncHandler(user.devCreateRepayDemoLoan));
 
 export default router;

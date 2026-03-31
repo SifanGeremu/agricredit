@@ -413,6 +413,29 @@ export const repayLoan = async (
   }
 };
 
+export const createRepayDemoLoan = async (): Promise<{
+  success: boolean;
+  message?: string;
+}> => {
+  try {
+    const body = await fetchJson('/user/dev/create-repay-demo-loan', { method: 'POST' });
+    return { success: true, message: body.message || 'Demo loan created' };
+  } catch (e: unknown) {
+    return { success: false, message: e instanceof Error ? e.message : 'Failed to create demo loan' };
+  }
+};
+
+export const confirmLoanReceived = async (
+  loanId: string
+): Promise<{ success: boolean; message?: string }> => {
+  try {
+    const body = await fetchJson(`/user/loan/${loanId}/confirm-received`, { method: 'POST' });
+    return { success: true, message: body.message || 'Confirmed' };
+  } catch (e: unknown) {
+    return { success: false, message: e instanceof Error ? e.message : 'Failed' };
+  }
+};
+
 export const addProduct = async (product: Partial<Product>): Promise<void> => {
   await fetchJson('/vendor/products', {
     method: 'POST',

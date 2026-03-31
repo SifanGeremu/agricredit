@@ -155,4 +155,18 @@ Integrated for **Ethiopia sandbox** (`https://apisandbox.safaricom.et`): OAuth `
 
 **`.env` (see `.env.example`):** `MPESA_CONSUMER_KEY`, `MPESA_CONSUMER_SECRET`, `MPESA_SHORTCODE`, `MPESA_PASSKEY` (STK), `MPESA_INITIATOR_NAME`, `MPESA_SECURITY_CREDENTIAL` (B2C), `MPESA_CALLBACK_URL` (and optional `MPESA_RESULT_URL`, `MPESA_QUEUE_TIMEOUT_URL`, `MPESA_STK_CALLBACK_URL`). Use **international MSISDN** without `+` (e.g. `2517…` in ET sandbox).
 
+### Using your Postman STK JSON (push prompt)
+
+- `POST /mpesa/stk/push` forwards the exact STK payload JSON (the same shape as Postman `.../stkpush/v3/processrequest`) and returns the Safaricom response fields (`CheckoutRequestID`, etc).
+- It always uses backend OAuth (`MPESA_CONSUMER_KEY` / `MPESA_CONSUMER_SECRET`) even if the client sends an `Authorization` header.
+
+### Reusing the Postman JSON inside `/mpesa/repay`
+
+If you want the normal loan repayment endpoint (`POST /mpesa/repay`) to reuse all the fields from your Postman JSON (MerchantRequestID, TransactionDesc, ReferenceData, etc), set:
+
+- `MPESA_STK_PAYLOAD_TEMPLATE_JSON` = your Postman C2B/STK JSON body (as a single JSON string)
+- `MPESA_STK_TEMPLATE_KEEP_PASSWORD_TIMESTAMP=true` if you also want to keep the template’s `Password` + `Timestamp` (default is to compute fresh ones from `MPESA_PASSKEY`)
+
+`/mpesa/repay` will still override the dynamic values per request: `Amount`, `PartyA`, `PhoneNumber`, `CallBackURL`, and `AccountReference` (unique reference used to finalize repayment on callback).
+
 If the sandbox call fails or keys are missing, the API still returns success for demos and **records** `Transaction` rows.

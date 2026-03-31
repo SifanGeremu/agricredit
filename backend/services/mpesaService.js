@@ -36,6 +36,27 @@ function normalizeMsisdn(phone) {
   return String(phone).replace(/\D/g, '');
 }
 
+/**
+ * Accept passkey either as the plain portal value OR base64(passkey) (common Postman confusion).
+ * If the env looks like base64 and cleanly round-trips, decode it.
+ */
+function normalizePasskey(passkey) {
+  const raw = String(passkey || '').trim();
+  if (!raw) return '';
+  if (!/^[A-Za-z0-9+/=]+$/.test(raw) || raw.length % 4 !== 0) return raw;
+  try {
+    const decoded = Buffer.from(raw, 'base64').toString('utf8');
+    if (!decoded) return raw;
+    // reject binary / control chars
+    if (/[\u0000-\u001F\u007F]/.test(decoded)) return raw;
+    const re = Buffer.from(decoded, 'utf8').toString('base64');
+    const norm = (s) => String(s).replace(/=+$/g, '');
+    return norm(re) === norm(raw) ? decoded : raw;
+  } catch {
+    return raw;
+  }
+}
+
 function isEthiopiaStyleBase(base) {
   return /safaricom\.et/i.test(base);
 }
@@ -107,10 +128,19 @@ async function fetchMpesaToken() {
   }
   const { tokenUrl } = mpesaEndpoints();
   const auth = Buffer.from(`${key}:${secret}`).toString('base64');
-  const res = await fetch(tokenUrl, {
-    method: 'GET',
-    headers: { Authorization: `Basic ${auth}` },
-  });
+  let res;
+  try {
+    res = await fetch(tokenUrl, {
+      method: 'GET',
+      headers: { Authorization: `Basic ${auth}` },
+    });
+  } catch (e) {
+    const msg = e?.cause?.message || e?.message || String(e);
+    return {
+      token: null,
+      error: `Network error fetching OAuth token from ${tokenUrl}: ${msg}`,
+    };
+  }
   const text = await res.text();
   if (!res.ok) {
     return {
@@ -131,6 +161,16 @@ async function fetchMpesaToken() {
   return { token, error: null };
 }
 
+export async function probeMpesaOAuth() {
+  try {
+    const { token, error } = await fetchMpesaToken();
+    if (!token) return { ok: false, error: error || 'OAuth token missing.' };
+    return { ok: true, error: null };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
 /** Ethiopia STK (Postman mpesa-developers-api C2B): ReferenceData uses Key / Value (PascalCase). */
 function ethiopiaStkReferenceData() {
   const raw = process.env.MPESA_STK_REFERENCE_DATA;
@@ -144,6 +184,33 @@ function ethiopiaStkReferenceData() {
   }
   const cashier = process.env.MPESA_STK_CASHIER_NAME || 'Cha cha';
   return [{ Key: 'CashierName', Value: cashier }];
+}
+
+/**
+ * Optional Postman STK JSON template (Ethiopia v3 shape) — lets you reuse the exact JSON fields from
+ * a Postman collection while still overriding dynamic values (Amount, PhoneNumber, etc).
+ *
+ * Env var should contain a JSON object with keys like:
+ * MerchantRequestID, BusinessShortCode, Password, Timestamp, TransactionType, Amount, PartyA, PartyB,
+ * PhoneNumber, CallBackURL, AccountReference, TransactionDesc, ReferenceData.
+ */
+function stkPayloadTemplateFromEnv() {
+  let raw = process.env.MPESA_STK_PAYLOAD_TEMPLATE_JSON;
+  if (!raw) return null;
+  raw = String(raw).trim();
+  if (
+    (raw.startsWith("'") && raw.endsWith("'")) ||
+    (raw.startsWith('"') && raw.endsWith('"'))
+  ) {
+    raw = raw.slice(1, -1);
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 function callbackUrls() {
@@ -179,6 +246,115 @@ function pickStkFields(parsed) {
   };
 }
 
+/**
+ * Raw STK Push forwarder — accepts a Postman-shaped payload and sends it to Safaricom STK endpoint.
+ * Uses backend OAuth (MPESA_CONSUMER_KEY/SECRET) regardless of any client-provided Authorization header.
+ *
+ * This is intentionally "thin": it does not compute Password/Timestamp; it forwards the payload as-is.
+ * Use `receiveRepayment()` if you want the backend to compute dynamic values and tie the payment to a loan.
+ */
+export async function stkPushFromPayload(payload) {
+  let body = payload;
+  if (typeof body === 'string') {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      return { ok: false, message: 'Invalid STK payload (string was not valid JSON).' };
+    }
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Invalid STK payload (expected JSON object).' };
+  }
+
+  if (mpesaMockMode()) {
+    const stkTimestamp = mpesaTimestampEAT();
+    const checkoutId = `ws_CO_${Date.now()}${crypto.randomBytes(2).toString('hex')}`;
+    const merchantReqId = `Partner names -${crypto.randomUUID()}`;
+    const postmanStyleResponse = {
+      MerchantRequestID: merchantReqId,
+      CheckoutRequestID: checkoutId,
+      ResponseCode: '0',
+      ResponseDescription: 'Success',
+      CustomerMessage: 'Success. Request accepted for processing',
+      MerchantCode: String(process.env.MPESA_SHORTCODE || '6564'),
+    };
+    return {
+      ok: true,
+      mock: true,
+      stkInitiated: true,
+      simulated: false,
+      timestampUsed: stkTimestamp,
+      responseCode: '0',
+      customerMessage: postmanStyleResponse.CustomerMessage,
+      checkoutRequestId: checkoutId,
+      merchantRequestId: merchantReqId,
+      postmanStyleResponse,
+      message: 'Mock STK — no call to Safaricom (MPESA_MOCK_MODE=true).',
+    };
+  }
+
+  let apiOk = false;
+  let apiDetail = '';
+  let parsed = null;
+
+  try {
+    const { token, error } = await fetchMpesaToken();
+    if (!token) {
+      return {
+        ok: false,
+        stkInitiated: false,
+        simulated: false,
+        message: error || 'Missing OAuth token (check MPESA_CONSUMER_KEY/SECRET).',
+      };
+    }
+
+    const { stkUrl } = mpesaEndpoints();
+    const res = await fetch(stkUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      apiDetail = text.slice(0, 400);
+    }
+
+    apiOk = res.ok && (parsed ? stkBodyIndicatesSuccess(parsed) : false);
+    if (!apiOk && parsed) {
+      const fields = pickStkFields(parsed);
+      apiDetail =
+        fields.resultDesc ||
+        fields.customerMessage ||
+        `ResponseCode=${fields.responseCode}` ||
+        text.slice(0, 300);
+    }
+    if (!apiOk && !parsed && text) apiDetail = text.slice(0, 400);
+  } catch (e) {
+    apiOk = false;
+    apiDetail = e.message || String(e);
+  }
+
+  const stkFields = pickStkFields(parsed);
+  return {
+    ok: apiOk,
+    stkInitiated: apiOk,
+    simulated: false,
+    responseCode: stkFields.responseCode,
+    customerMessage: stkFields.customerMessage,
+    checkoutRequestId: stkFields.checkoutRequestId,
+    merchantRequestId: stkFields.merchantRequestId,
+    message: apiOk
+      ? stkFields.customerMessage ||
+        'STK Push accepted. Approve on your phone when prompted; callback goes to CallBackURL.'
+      : apiDetail || 'STK Push was not accepted.',
+  };
+}
+
 export async function disburseToVendor(phone, amount) {
   const reference = genReference('DISB');
   const msisdn = normalizeMsisdn(phone);
@@ -211,9 +387,9 @@ export async function disburseToVendor(phone, amount) {
   try {
     const { token, error: tokErr } = await fetchMpesaToken();
     tokenError = tokErr;
-    const shortcode = process.env.MPESA_SHORTCODE;
-    const initiator = process.env.MPESA_INITIATOR_NAME;
-    const securityCredential = process.env.MPESA_SECURITY_CREDENTIAL;
+    const shortcode = String(process.env.MPESA_SHORTCODE || '').trim();
+    const initiator = String(process.env.MPESA_INITIATOR_NAME || '').trim();
+    const securityCredential = String(process.env.MPESA_SECURITY_CREDENTIAL || '').trim();
 
     if (token && shortcode && initiator && securityCredential && msisdn) {
       const { b2cUrl, et } = mpesaEndpoints();
@@ -249,14 +425,22 @@ export async function disburseToVendor(phone, amount) {
             Occasion: reference,
           };
 
-      const probe = await fetch(b2cUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+      let probe;
+      try {
+        probe = await fetch(b2cUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (e) {
+        apiOk = false;
+        apiDetail = `Network error calling ${b2cUrl}: ${e?.cause?.message || e?.message || String(e)}`;
+        probe = null;
+      }
+      if (!probe) throw new Error(apiDetail);
       const text = await probe.text();
       try {
         parsed = JSON.parse(text);
@@ -378,8 +562,9 @@ export async function receiveRepayment(phone, amount) {
   let apiDetail = '';
   let parsed = null;
   let stkTimestamp = null;
-  const shortcode = process.env.MPESA_SHORTCODE;
-  const passkey = process.env.MPESA_PASSKEY;
+  const shortcode = String(process.env.MPESA_SHORTCODE || '').trim();
+  const passkey = normalizePasskey(process.env.MPESA_PASSKEY);
+  const template = stkPayloadTemplateFromEnv();
 
   let tokenError = null;
   try {
@@ -399,7 +584,8 @@ export async function receiveRepayment(phone, amount) {
       const merchantPrefix =
         process.env.MPESA_STK_MERCHANT_PREFIX || 'Partner names';
 
-      const payload = et
+      // Default (no template): build the normal payload.
+      let payload = et
         ? {
             MerchantRequestID: `${merchantPrefix} -${crypto.randomUUID()}`,
             BusinessShortCode: String(shortcode),
@@ -429,14 +615,53 @@ export async function receiveRepayment(phone, amount) {
             TransactionDesc: txDesc,
           };
 
-      const stk = await fetch(stkUrl, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
+      // If you paste the Postman JSON into MPESA_STK_PAYLOAD_TEMPLATE_JSON, reuse all fields from it
+      // and override only the values that must be dynamic for each repayment.
+      if (template && et) {
+        payload = {
+          ...template,
+          // Always keep these aligned with current repayment request:
+          Amount: Math.floor(amount),
+          PartyA: String(msisdn),
+          PhoneNumber: String(msisdn),
+          CallBackURL: cb.stk,
+          // Make AccountReference unique so the callback can finalize the correct pending repayment:
+          AccountReference: stkAccountRef,
+          // Prefer backend-calculated (fresh) timestamp/password unless explicitly told to keep the template values.
+          ...(process.env.MPESA_STK_TEMPLATE_KEEP_PASSWORD_TIMESTAMP === 'true'
+            ? {}
+            : { Timestamp: timestamp, Password: password }),
+          // Always prefer backend shortcode to avoid mismatches across environments:
+          BusinessShortCode: String(shortcode),
+          PartyB: String(shortcode),
+          // Ensure ReferenceData exists for Ethiopia STK v3
+          ReferenceData:
+            Array.isArray(template.ReferenceData) && template.ReferenceData.length
+              ? template.ReferenceData
+              : ethiopiaStkReferenceData(),
+          // Keep TransactionDesc sane if template omitted it
+          TransactionDesc: template.TransactionDesc || txDesc,
+          // Keep TransactionType sane if template omitted it
+          TransactionType: template.TransactionType || 'CustomerPayBillOnline',
+        };
+      }
+
+      let stk;
+      try {
+        stk = await fetch(stkUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+      } catch (e) {
+        apiOk = false;
+        apiDetail = `Network error calling ${stkUrl}: ${e?.cause?.message || e?.message || String(e)}`;
+        stk = null;
+      }
+      if (!stk) throw new Error(apiDetail);
       const text = await stk.text();
       try {
         parsed = JSON.parse(text);
@@ -467,7 +692,7 @@ export async function receiveRepayment(phone, amount) {
     }
   } catch (e) {
     apiOk = false;
-    apiDetail = e.message || String(e);
+    apiDetail = e?.cause?.message || e?.message || String(e);
   }
 
   const stkFields = pickStkFields(parsed);
